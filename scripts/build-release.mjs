@@ -1,0 +1,100 @@
+#!/usr/bin/env node
+// 生成 GitHub Release 用的 ZIP：dist/qq-bridge-enhanced-v<版本>.zip（+ .sha256）。
+//
+// 打包范围：git 仓库里 `git ls-files` 列出的已跟踪文件（天然遵守 .gitignore）；不在 git 仓库里时
+// 退回到「遍历目录 + 内置排除清单」。无论哪种方式，打包前都会做敏感文件检查，命中即失败：
+// config.json、state/、node_modules/、audio/、*.log、*.bak、TOTP 秘密、控制台令牌、SnowLuma 二进制等。
+//
+// 压缩用系统自带工具：Windows 10+ 的 tar.exe（bsdtar，`-a` 按扩展名生成 zip）；其它平台用 zip。
+// 用法：node scripts/build-release.mjs [--out dist]
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const version = pkg.version;
+const name = `qq-bridge-enhanced-v${version}`;
+const outIdx = process.argv.indexOf('--out');
+const outDir = path.resolve(root, outIdx > 0 ? process.argv[outIdx + 1] : 'dist');
+
+const EXCLUDE_DIRS = new Set(['node_modules', 'state', 'audio', 'dist', '.git', '.npm-cache', '.claude']);
+const EXCLUDE_PREFIXES = ['docs/audits/', 'docs/design/', 'docs/legacy/', 'docs/research/'];
+const FORBIDDEN = [
+  /^config\.json$/,
+  /^state\//,
+  /(^|\/)node_modules\//,
+  /^audio\//,
+  /\.log$/,
+  /\.bak(-|$)/,
+  /(^|\/)totp\.json$/,
+  /(^|\/)console-token$/,
+  /\.(node|dll|exe)$/i,
+  /^_snowluma-catalog\.json$/,
+  /^scripts\/privacy-rules\.json$/,
+  // SnowLuma 本体（专有组件不得再分发，EULA §5.4）
+  /^snowluma\//i,
+  /snowluma-win32/i,
+  /^SnowLuma[^/]*(\/|\.zip$)/i,
+];
+
+function listFiles() {
+  const git = spawnSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' });
+  if (git.status === 0 && git.stdout) {
+    return { source: 'git ls-files', files: git.stdout.split('\0').filter(Boolean) };
+  }
+  const files = [];
+  const walk = (dir) => {
+    for (const ent of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
+      const rel = dir ? `${dir}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) {
+        if (EXCLUDE_DIRS.has(ent.name)) continue;
+        if (EXCLUDE_PREFIXES.some((p) => `${rel}/`.startsWith(p))) continue;
+        walk(rel);
+      } else if (ent.isFile()) {
+        files.push(rel);
+      }
+    }
+  };
+  walk('');
+  return { source: '目录遍历（未检测到 git）', files: files.filter((f) => !FORBIDDEN.some((re) => re.test(f))) };
+}
+
+const { source, files } = listFiles();
+const bad = files.filter((f) => FORBIDDEN.some((re) => re.test(f)));
+if (bad.length) {
+  console.error(`❌ 打包清单里有不应发布的文件（请从 git 里移除或加入 .gitignore）：\n  ${bad.join('\n  ')}`);
+  process.exit(1);
+}
+for (const must of ['package.json', 'package-lock.json', 'src/bridge.js', 'config.example.json', 'README.md', 'LICENSE', 'NOTICE.md', 'CHANGELOG.md', 'docs/DSH_DEPLOYMENT.md', 'start.bat', 'scripts/setup-dsh.mjs', 'scripts/test-audit.mjs']) {
+  if (!files.includes(must)) { console.error(`❌ 打包清单缺少必需文件：${must}`); process.exit(1); }
+}
+
+const stage = path.join(outDir, name);
+fs.rmSync(stage, { recursive: true, force: true });
+fs.mkdirSync(stage, { recursive: true });
+for (const rel of files) {
+  const src = path.join(root, rel);
+  if (!fs.existsSync(src)) continue; // 已删除但未提交
+  const dest = path.join(stage, rel);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.copyFileSync(src, dest);
+}
+
+const zip = path.join(outDir, `${name}.zip`);
+fs.rmSync(zip, { force: true });
+// Windows：显式用系统自带的 bsdtar（Git Bash / MSYS 里的 GNU tar 不支持 -a 生成 zip，且会把 "D:" 当成远程主机）；
+// 压缩包路径用相对名，避免盘符被误解析。
+const winTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+const r = process.platform === 'win32'
+  ? spawnSync(winTar, ['-a', '-c', '-f', `${name}.zip`, name], { cwd: outDir, stdio: 'inherit' })
+  : spawnSync('zip', ['-qr', zip, name], { cwd: outDir, stdio: 'inherit' });
+if (r.status !== 0) { console.error('❌ 压缩失败（Windows 需要系统自带的 tar.exe；其它平台需要 zip）'); process.exit(1); }
+
+const hash = crypto.createHash('sha256').update(fs.readFileSync(zip)).digest('hex');
+fs.writeFileSync(`${zip}.sha256`, `${hash}  ${name}.zip\n`);
+fs.rmSync(stage, { recursive: true, force: true });
+console.log(`✅ ${path.relative(root, zip)}（${files.length} 个文件，来源：${source}）`);
+console.log(`   SHA-256 ${hash}`);

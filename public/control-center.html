@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qq-bridge 控制中心</title>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #161b22; --panel2: #1c232c; --line: #2a333e; --text: #e6edf3; --muted: #8b98a5;
+    --accent: #4c9aff; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --term: #0b0e12; --chip: #212a35;
+    --radius: 10px; --mono: ui-monospace, "Cascadia Mono", Consolas, "Microsoft YaHei Mono", monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f4f6f8; --panel: #ffffff; --panel2: #f7f9fb; --line: #dde3ea; --text: #1f2328; --muted: #5d6b78; --term: #0f1419; --chip: #eef2f6; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; display: flex; flex-direction: column; }
+  button { font: inherit; color: inherit; background: var(--chip); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
+  button.danger.solid { background: var(--bad); color: #fff; }
+  button.ghost { background: transparent; }
+  input[type=text], input[type=search] { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 0; }
+  input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  label.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; user-select: none; }
+
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header .spacer { flex: 1; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; background: var(--chip); border: 1px solid var(--line); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .badge.level-L0 { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+  .badge.level-L1, .badge.level-L2 { color: var(--warn); border-color: var(--warn); }
+  .badge.level-L3 { color: #fff; background: var(--bad); border-color: var(--bad); }
+
+  #banners { padding: 0 18px; }
+  .banner { margin-top: 10px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: 13px; }
+  .banner.bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+
+  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px 18px; min-height: 0; overflow: auto; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 420px; min-width: 0; }
+  .card-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .card-head h2 { font-size: 15px; margin: 0; font-weight: 600; }
+  .card-head .grow { flex: 1; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; flex: none; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .dot.warn { background: var(--warn); }
+  .dot.off { background: var(--bad); }
+  .toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; background: var(--panel2); }
+  .toolbar input[type=search] { width: 170px; }
+  .term { flex: 1; min-height: 220px; overflow: auto; background: var(--term); color: #d7dde4; font: 12.5px/1.55 var(--mono); padding: 10px 12px; white-space: pre-wrap; word-break: break-all; }
+  .term .l { display: block; }
+  .term .t { color: #5f6b77; margin-right: 8px; user-select: none; }
+  .term .stderr { color: #ff8a80; }
+  .term .system { color: #7cc4ff; }
+  .term .cmd { color: #c9a7ff; }
+  .term .hit { background: #3a3000; }
+  .term .empty { color: #5f6b77; }
+  .cmdline { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+  .cmdline input { flex: 1; font-family: var(--mono); }
+  .cmdline .prompt { font-family: var(--mono); color: var(--accent); align-self: center; }
+
+  .info { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .info dt { color: var(--muted); }
+  .info dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .empty-state { padding: 22px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .empty-state p { margin: 0; color: var(--muted); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row input[type=text] { flex: 1; min-width: 220px; }
+  .note { font-size: 12px; color: var(--muted); }
+  .panel-sub { padding: 12px 14px; border-bottom: 1px solid var(--line); display: none; flex-direction: column; gap: 10px; background: var(--panel2); }
+  .panel-sub.show { display: flex; }
+  .panel-sub h3 { margin: 0; font-size: 14px; }
+  .panel-sub ol { margin: 0; padding-left: 20px; color: var(--muted); font-size: 13px; }
+  details.notes { font-size: 12.5px; color: var(--muted); }
+  details.notes pre { white-space: pre-wrap; font: 12px/1.5 var(--mono); max-height: 180px; overflow: auto; margin: 6px 0 0; }
+
+  footer { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 18px; border-top: 1px solid var(--line); background: var(--panel); font-size: 12.5px; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 8px; background: var(--chip); border: 1px solid var(--line); white-space: nowrap; }
+  .chip b { font-weight: 600; }
+  .chip span { color: var(--muted); }
+
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); padding: 18px 20px; max-width: 460px; }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h3 { margin: 0 0 8px; font-size: 15px; }
+  dialog p { margin: 0 0 14px; color: var(--muted); white-space: pre-wrap; }
+  dialog .row { justify-content: flex-end; }
+  #toast { position: fixed; right: 18px; bottom: 56px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
+  .toast { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); padding: 8px 12px; border-radius: 8px; max-width: 420px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+  .toast.bad { border-left-color: var(--bad); }
+  .toast.ok { border-left-color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>qq-bridge 控制中心</h1>
+  <span class="badge" id="verBadge">v—</span>
+  <span class="badge" id="modeBadge" title="当前运行模式与权限级别">模式 —</span>
+  <span class="badge" id="pendingBadge" title="待审批 / 待确认申请">待审批 0 · 待确认 0</span>
+  <span class="spacer"></span>
+  <button class="danger solid" id="panicBtn" title="立即回到安全模式（L0 群友模式），停止运维 Agent">紧急关闭</button>
+  <a id="consoleLink" class="badge" href="#" title="原来的桥接控制台（模式、会话、人格、黑话、令牌花费等）">打开桥接控制台 ↗</a>
+  <button class="ghost" id="exitBtn" title="先停止由控制中心启动的桥接与 SnowLuma，再退出控制中心">退出控制中心</button>
+</header>
+<div id="banners"></div>
+
+<main>
+  <!-- ── 左：桥接 ───────────────────────────────────────────── -->
+  <section class="card" aria-labelledby="bridgeTitle">
+    <div class="card-head">
+      <span class="dot" id="bridgeDot"></span>
+      <h2 id="bridgeTitle">桥接</h2>
+      <span class="badge" id="bridgeState">未启动</span>
+      <span class="grow"></span>
+      <button class="primary" id="bridgeStart">启动桥接</button>
+      <button id="bridgeRestart">重启</button>
+      <button class="danger" id="bridgeStop">停止桥接</button>
+    </div>
+    <div class="toolbar">
+      <input type="search" id="bridgeFilter" placeholder="过滤日志…" aria-label="过滤桥接日志">
+      <label class="check"><input type="checkbox" id="bridgeErrors"> 只看错误</label>
+      <label class="check"><input type="checkbox" id="bridgePause"> 暂停滚动</label>
+      <label class="check" title="桥接异常退出后 5 秒自动重启"><input type="checkbox" id="bridgeAuto"> 崩溃自动重启</label>
+      <span class="grow"></span>
+      <button class="ghost" id="bridgeDownload">下载日志</button>
+      <button class="ghost" id="bridgeClear">清屏</button>
+    </div>
+    <div class="term" id="bridgeTerm" role="log" aria-live="polite"></div>
+    <form class="cmdline" id="cmdForm" autocomplete="off">
+      <span class="prompt">›</span>
+      <input type="text" id="cmdInput" placeholder="输入命令，例如 status、panic、mode reserved2；help 查看全部" aria-label="控制中心命令">
+      <button class="primary" type="submit">发送</button>
+    </form>
+  </section>
+
+  <!-- ── 右：SnowLuma ───────────────────────────────────────── -->
+  <section class="card" aria-labelledby="snowTitle">
+    <div class="card-head">
+      <span class="dot" id="snowDot"></span>
+      <h2 id="snowTitle">SnowLuma</h2>
+      <span class="badge" id="snowState">未选择目录</span>
+      <span class="grow"></span>
+      <button class="primary" id="snowStart" disabled>启动 SnowLuma</button>
+      <button class="danger" id="snowStop" disabled>停止 SnowLuma</button>
+    </div>
+
+    <div id="snowPick" class="empty-state">
+      <p>选择你自己下载并解压的 SnowLuma 目录（含 <code>launcher.bat</code>、<code>index.mjs</code> 的那一层）。SnowLuma 不会放进项目里，也不会被自动启动。</p>
+      <div class="row">
+        <input type="text" id="snowDirInput" placeholder="例如 D:\SnowLuma-v1.14.22-win-x64" aria-label="SnowLuma 目录">
+        <button id="snowBrowse">浏览…</button>
+        <button class="primary" id="snowUse">使用这个目录</button>
+      </div>
+      <p class="note" id="snowPickMsg"></p>
+    </div>
+
+    <div id="snowReady" hidden>
+      <dl class="info">
+        <dt>版本</dt><dd id="snowVer">—</dd>
+        <dt>发行版</dt><dd id="snowEdition">—</dd>
+        <dt>目录</dt><dd id="snowDirText">—</dd>
+        <dt>已配置账号</dt><dd id="snowAccounts">—</dd>
+        <dt>WebUI</dt><dd id="snowWebui">—</dd>
+      </dl>
+      <div class="actions">
+        <button id="snowOpenWebui">打开 SnowLuma WebUI ↗</button>
+        <button id="snowCheck">检查更新</button>
+        <button id="snowUpdateHelper">更新助手</button>
+        <button class="ghost" id="snowChange">更换目录</button>
+      </div>
+      <div class="panel-sub" id="updatePanel">
+        <h3 id="updTitle">更新</h3>
+        <div id="updSummary" class="note"></div>
+        <details class="notes" id="updNotesWrap" hidden><summary>更新说明</summary><pre id="updNotes"></pre></details>
+        <ol>
+          <li>点「打开下载页」，下载 <b id="updAsset">win-x64 完整版</b>，解压到一个<b>新的</b>文件夹（不要覆盖当前目录）。</li>
+          <li>回到这里，先<b>停止 SnowLuma</b>，再选择新文件夹，点「迁移数据并切换」。</li>
+          <li>迁移会先把当前目录的 <code>config/</code>、<code>data/</code> 备份到 <code>state\snowluma-backups\</code>，再复制到新目录；旧目录原样保留，确认没问题后再自行删除。</li>
+        </ol>
+        <p class="note">AI 的记忆、人物库、会话在桥接的 <code>state\</code> 和 DSH 里，聊天记录在 QQ 客户端里，更新 SnowLuma 不会影响它们。控制中心只搬你的数据，不下载、不安装 SnowLuma 的程序文件（SnowLuma 用户协议 §5.4）。</p>
+        <div class="row">
+          <button id="updDownload">打开下载页 ↗</button>
+          <input type="text" id="migrateDir" placeholder="新版本解压后的目录" aria-label="新版本目录">
+          <button id="migrateBrowse">浏览…</button>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="migrateLogs"> 同时迁移 logs/</label>
+          <span class="grow"></span>
+          <button class="primary" id="migrateGo">迁移数据并切换</button>
+        </div>
+        <div id="migrateResult" class="note"></div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <input type="search" id="snowFilter" placeholder="过滤日志…" aria-label="过滤 SnowLuma 日志">
+      <label class="check"><input type="checkbox" id="snowErrors"> 只看错误</label>
+      <label class="check"><input type="checkbox" id="snowPause"> 暂停滚动</label>
+      <span class="grow"></span>
+      <button class="ghost" id="snowDownload">下载日志</button>
+      <button class="ghost" id="snowClear">清屏</button>
+    </div>
+    <div class="term" id="snowTerm" role="log" aria-live="polite"></div>
+  </section>
+</main>
+
+<footer id="statusBar">
+  <span class="chip"><span class="dot" id="sbBridgeDot"></span><b>桥接</b><span id="sbBridge">—</span></span>
+  <span class="chip"><span class="dot" id="sbSnowDot"></span><b>SnowLuma</b><span id="sbSnow">—</span></span>
+  <span class="chip"><span class="dot" id="sbQQDot"></span><b>QQ</b><span id="sbQQ">—</span></span>
+  <span class="chip"><span class="dot" id="sbDshDot"></span><b>DSH</b><span id="sbDsh">—</span></span>
+  <span class="chip"><b>模式</b><span id="sbMode">—</span></span>
+  <span class="chip"><b>版本</b><span id="sbVers">—</span></span>
+</footer>
+
+<dialog id="confirmDlg">
+  <h3 id="dlgTitle">确认</h3>
+  <p id="dlgText"></p>
+  <div class="row"><button id="dlgCancel">取消</button><button class="danger solid" id="dlgOk">确定</button></div>
+</dialog>
+<div id="toast" aria-live="polite"></div>
+
+<script>
+(() => {
+  // ── 令牌：从地址片段 #t=… 取得（片段不会发给服务器），存进 sessionStorage 后从地址栏抹掉 ──
+  const m = /[#&]t=([a-f0-9]{48})/.exec(location.hash);
+  if (m) { sessionStorage.setItem('ccToken', m[1]); history.replaceState(null, '', location.pathname); }
+  let token = sessionStorage.getItem('ccToken') || '';
+  const $ = (id) => document.getElementById(id);
+  // 没有令牌或令牌失效（例如直接输入了地址、控制中心换了令牌）：停止轮询，在页面里粘贴，不用 prompt()。
+  let authFailed = false;
+  function showTokenBox(reason) {
+    authFailed = true;
+    if ($('tokenBox')) return;
+    const box = document.createElement('div');
+    box.className = 'banner bad';
+    box.id = 'tokenBox';
+    box.append(`${reason}打开项目目录里的 state 文件夹，复制 control-center-token 文件的内容粘贴到这里（或重新双击 control-center.bat，它会带着令牌打开页面）。 `);
+    const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = '粘贴令牌'; inp.style.minWidth = '320px';
+    const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = '确定';
+    btn.onclick = () => { const v = inp.value.trim(); if (v) { sessionStorage.setItem('ccToken', v); location.reload(); } };
+    box.append(inp, ' ', btn);
+    $('banners').replaceChildren(box);
+  }
+  if (!token) showTokenBox('需要控制中心令牌：');
+
+  async function api(path, body) {
+    if (authFailed) throw new Error('需要控制中心令牌');
+    const res = await fetch(path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { 'x-control-token': token, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (res.status === 401) { sessionStorage.removeItem('ccToken'); showTokenBox('令牌无效或已更换：'); throw new Error('需要控制中心令牌'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+  function toast(text, kind = '') {
+    const el = document.createElement('div');
+    el.className = `toast ${kind}`;
+    el.textContent = text;
+    $('toast').appendChild(el);
+    setTimeout(() => el.remove(), kind === 'bad' ? 7000 : 3500);
+  }
+  function confirmBox(title, text, okText = '确定') {
+    return new Promise((resolve) => {
+      $('dlgTitle').textContent = title; $('dlgText').textContent = text; $('dlgOk').textContent = okText;
+      const dlg = $('confirmDlg');
+      const done = (v) => { dlg.close(); $('dlgOk').onclick = null; $('dlgCancel').onclick = null; resolve(v); };
+      $('dlgOk').onclick = () => done(true);
+      $('dlgCancel').onclick = () => done(false);
+      dlg.onclose = () => resolve(false);
+      dlg.showModal();
+    });
+  }
+  const fmtDur = (ms) => { if (!ms) return '0 秒'; const s = Math.floor(ms / 1000); const h = Math.floor(s / 3600); const mi = Math.floor((s % 3600) / 60); return h ? `${h} 小时 ${mi} 分` : mi ? `${mi} 分 ${s % 60} 秒` : `${s} 秒`; };
+  const setDot = (el, kind) => { el.className = `dot ${kind || ''}`; };
+
+  // ── 日志视图 ──
+  function makeLog(source, termId, filterId, errorsId, pauseId) {
+    const lines = []; let after = 0; let base = 0;
+    const term = $(termId);
+    const render = () => {
+      const q = $(filterId).value.trim().toLowerCase();
+      const errs = $(errorsId).checked;
+      const frag = document.createDocumentFragment();
+      const view = lines.filter((l) => l.seq > base && (!errs || l.stream === 'stderr' || /错误|失败|error|fail|⚠|⛔|🚨/i.test(l.text)) && (!q || l.text.toLowerCase().includes(q)));
+      if (!view.length) { const e = document.createElement('span'); e.className = 'empty'; e.textContent = q || errs ? '（没有匹配的日志）' : '（暂无输出）'; frag.appendChild(e); }
+      for (const l of view.slice(-2500)) {
+        const row = document.createElement('span');
+        row.className = `l ${l.stream}${l.text.startsWith('> ') ? ' cmd' : ''}`;
+        const t = document.createElement('span'); t.className = 't'; t.textContent = new Date(l.time).toLocaleTimeString();
+        row.appendChild(t); row.appendChild(document.createTextNode(l.text));
+        frag.appendChild(row);
+      }
+      term.replaceChildren(frag);
+      if (!$(pauseId).checked) term.scrollTop = term.scrollHeight;
+    };
+    async function poll() {
+      if (authFailed) return;
+      try {
+        const r = await api(`/api/logs?source=${source}&after=${after}`);
+        if (r.lines.length) { lines.push(...r.lines); if (lines.length > 4000) lines.splice(0, lines.length - 4000); after = r.lastSeq; render(); }
+      } catch {}
+    }
+    for (const id of [filterId, errorsId]) $(id).addEventListener('input', render);
+    return {
+      poll, render,
+      clear() { base = after; render(); },
+      download() {
+        const blob = new Blob([lines.map((l) => `[${new Date(l.time).toISOString()}] ${l.stream === 'stderr' ? 'ERR ' : ''}${l.text}`).join('\n')], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${source}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`; a.click(); URL.revokeObjectURL(a.href);
+      },
+    };
+  }
+  const bridgeLog = makeLog('bridge', 'bridgeTerm', 'bridgeFilter', 'bridgeErrors', 'bridgePause');
+  const snowLog = makeLog('snowluma', 'snowTerm', 'snowFilter', 'snowErrors', 'snowPause');
+  $('bridgeClear').onclick = () => bridgeLog.clear();
+  $('snowClear').onclick = () => snowLog.clear();
+  $('bridgeDownload').onclick = () => bridgeLog.download();
+  $('snowDownload').onclick = () => snowLog.download();
+
+  // ── 状态 ──
+  let S = null;
+  async function refresh() {
+    if (authFailed) return;
+    try { S = await api('/api/state'); } catch { return; }
+    const b = S.bridge; const sl = S.snowluma; const h = S.health; const st = h.bridgeApi;
+    $('verBadge').textContent = `v${S.version}`;
+    // 横幅
+    const banners = [];
+    if (!h.config.valid) banners.push({ bad: !h.config.exists ? false : true, text: h.config.error });
+    if (h.bridgeExternal) banners.push({ bad: false, text: '检测到桥接已经在别处运行（例如你双击了 start.bat）。控制中心不会接管它；要在这里管理，请先关掉那个窗口再点「启动桥接」。' });
+    if (sl.info?.ok && !sl.running && h.snowlumaPort) banners.push({ bad: false, text: `SnowLuma 的 WebUI 端口 ${sl.info.webui.port} 正在被使用：SnowLuma 可能已经在别处运行（不是由控制中心启动的，这里无法停止它）。` });
+    if (st?.level && st.level !== 'L0') banners.push({ bad: true, text: `当前处于 ${st.level} 高权限（运维 Agent）。不用时请点「紧急关闭」，或在 QQ 私聊发 /panic。` });
+    if (!$('tokenBox')) $('banners').replaceChildren(...banners.map((x) => { const d = document.createElement('div'); d.className = `banner ${x.bad ? 'bad' : ''}`; d.textContent = x.text; return d; }));
+    // 桥接卡片
+    const bRun = b.running;
+    setDot($('bridgeDot'), bRun ? (st ? 'on' : 'warn') : (h.bridgeExternal ? 'warn' : ''));
+    $('bridgeState').textContent = bRun ? `运行中 · PID ${b.pid} · ${fmtDur(b.uptimeMs)}${b.restarts ? ` · 已自动重启 ${b.restarts} 次` : ''}` : (b.restartPending ? '等待自动重启…' : (h.bridgeExternal ? '外部运行中' : (b.lastExit ? `已停止（退出码 ${b.lastExit.code ?? '—'}）` : '未启动')));
+    $('bridgeStart').disabled = bRun || h.bridgeExternal;
+    $('bridgeStop').disabled = !bRun && !b.restartPending;
+    $('bridgeRestart').disabled = !bRun;
+    $('bridgeAuto').checked = !!b.autoRestart;
+    // 模式
+    const level = st?.level || 'L0';
+    $('modeBadge').textContent = st ? `模式 ${st.mode} · ${level}` : '模式 —（桥接未运行）';
+    $('modeBadge').className = `badge level-${st ? level : ''}`;
+    $('pendingBadge').textContent = `待审批 ${st?.pendingApprovals ?? 0} · 待确认 ${st?.adminPendingRequests ?? 0}`;
+    $('panicBtn').disabled = !st;
+    $('consoleLink').href = `http://127.0.0.1:${h.consolePort || 3100}/`;
+    // SnowLuma 卡片
+    const hasDir = !!sl.info?.ok;
+    $('snowPick').hidden = hasDir && !$('snowPick').dataset.forceShow;
+    $('snowReady').hidden = !hasDir || !!$('snowPick').dataset.forceShow;
+    if (!hasDir && sl.dir) $('snowPickMsg').textContent = `之前选择的目录不可用：${sl.info?.error || ''}`;
+    const sRun = sl.running;
+    setDot($('snowDot'), sRun ? (h.snowlumaPort ? 'on' : 'warn') : (h.snowlumaPort ? 'warn' : ''));
+    $('snowState').textContent = !hasDir ? '未选择目录' : sRun ? `运行中 · PID ${sl.pid} · ${fmtDur(sl.uptimeMs)}` : (h.snowlumaPort ? '外部运行中' : (sl.lastExit ? `已停止（退出码 ${sl.lastExit.code ?? '—'}）` : '未启动'));
+    $('snowStart').disabled = !hasDir || sRun || h.snowlumaPort;
+    $('snowStop').disabled = !sRun;
+    if (hasDir) {
+      const i = sl.info;
+      $('snowVer').textContent = i.version + (sl.update?.latest ? (sl.update.updateAvailable ? `（有新版本 ${sl.update.latest}）` : '（已是最新）') : '');
+      $('snowEdition').textContent = i.edition === 'full' ? '完整版（自带 Node 运行时）' : 'Lite 版（使用本机 Node，需要 22.13+）';
+      $('snowDirText').textContent = i.dir;
+      $('snowAccounts').textContent = i.accounts?.length ? i.accounts.join('、') : '还没有（首次在 SnowLuma WebUI 里扫码登录后生成）';
+      $('snowWebui').textContent = i.webui.url;
+    }
+    // 状态栏
+    setDot($('sbBridgeDot'), bRun ? 'on' : (h.bridgeExternal ? 'warn' : 'off'));
+    $('sbBridge').textContent = bRun ? `运行 ${fmtDur(b.uptimeMs)}` : (h.bridgeExternal ? '外部运行' : '未运行');
+    setDot($('sbSnowDot'), sRun || h.snowlumaPort ? (st?.snowluma?.connected ? 'on' : 'warn') : 'off');
+    $('sbSnow').textContent = !hasDir ? '未选择' : (sRun || h.snowlumaPort) ? (st?.snowluma?.connected ? '已连接桥接' : '运行中（桥接未连上）') : '未运行';
+    const sh = st?.snowluma;
+    const qqOk = sh && sh.accountOnline !== false && sh.good !== false && sh.connected;
+    setDot($('sbQQDot'), !st ? '' : qqOk ? 'on' : (sh?.connected ? 'warn' : 'off'));
+    const acct = st?.botAccount ? `${st.botAccount.nickname || ''}（${st.botAccount.userId || '?'}）` : '';
+    $('sbQQ').textContent = !st ? '—' : !sh?.connected ? '未连接' : sh.good === false ? `接收异常 ${acct}` : sh.accountOnline === false ? `账号离线 ${acct}` : `在线 ${acct}`;
+    setDot($('sbDshDot'), h.dsh?.reachable ? (st ? (st.dshReady ? 'on' : 'warn') : 'on') : 'off');
+    $('sbDsh').textContent = h.dsh?.reachable ? (st ? (st.dshReady ? '已就绪' : '可达，桥接未就绪') : '可达') : '不可达';
+    $('sbMode').textContent = st ? `${st.mode} / ${level}` : '—';
+    $('sbVers').textContent = `控制中心 ${S.version} · 桥接 ${st?.version ?? '—'} · SnowLuma ${hasDir ? sl.info.version : '—'} · DSH ${h.dsh?.version ?? '—'} · Node ${S.node}`;
+  }
+
+  async function act(fn, okMsg) {
+    if (authFailed) return null;
+    try { const r = await fn(); if (okMsg) toast(okMsg, 'ok'); await refresh(); return r; }
+    catch (e) { toast(e.message, 'bad'); await refresh(); return null; }
+  }
+
+  // ── 桥接按钮 ──
+  $('bridgeStart').onclick = () => act(() => api('/api/bridge/start', {}), '桥接已启动');
+  $('bridgeRestart').onclick = async () => { if (await confirmBox('重启桥接', '重启期间群里不会有回复，正在进行的 AI 回合会被中断。', '重启')) act(() => api('/api/bridge/restart', {}), '已重启'); };
+  $('bridgeStop').onclick = async () => { if (await confirmBox('停止桥接', '停止后机器人在群里和私聊里都不会再回复（QQ 仍然在线）。', '停止桥接')) act(() => api('/api/bridge/stop', {}), '桥接已停止'); };
+  $('bridgeAuto').onchange = (e) => act(() => api('/api/bridge/auto-restart', { enabled: e.target.checked }));
+  $('panicBtn').onclick = async () => { if (await confirmBox('紧急关闭', '立即回到安全模式（L0 群友模式），停止运维 Agent，作废所有待审批与待确认申请。', '紧急关闭')) act(() => api('/api/command', { text: 'panic' })); };
+  $('exitBtn').onclick = async () => {
+    if (!await confirmBox('退出控制中心', '会先停止由控制中心启动的桥接和 SnowLuma（机器人将离线），然后关闭控制中心。', '全部退出')) return;
+    try { await api('/api/exit', {}); } catch {}
+    document.body.innerHTML = '<div style="padding:40px;font-size:15px">控制中心已退出，可以关闭这个页面。</div>';
+  };
+
+  // ── 命令行 ──
+  const cmdHistory = []; let hi = 0;
+  $('cmdForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const text = $('cmdInput').value.trim(); if (!text) return;
+    cmdHistory.push(text); hi = cmdHistory.length; $('cmdInput').value = '';
+    if (/^(bridge|snowluma)\s+stop$|^panic$/i.test(text) && !await confirmBox('确认命令', `确定执行「${text}」？`, '执行')) return;
+    try { const r = await api('/api/command', { text }); if (r.result?.clear) bridgeLog.clear(); } catch (err) { toast(err.message, 'bad'); }
+    setTimeout(() => { bridgeLog.poll(); refresh(); }, 300);
+  };
+  $('cmdInput').onkeydown = (e) => {
+    if (e.key === 'ArrowUp' && hi > 0) { hi -= 1; $('cmdInput').value = cmdHistory[hi]; e.preventDefault(); }
+    if (e.key === 'ArrowDown') { hi = Math.min(cmdHistory.length, hi + 1); $('cmdInput').value = cmdHistory[hi] ?? ''; e.preventDefault(); }
+  };
+
+  // ── SnowLuma 按钮 ──
+  async function browse(targetId) {
+    toast('已打开文件夹选择窗口（可能在浏览器后面）');
+    const r = await act(() => api('/api/snowluma/pick', {}));
+    if (r?.dir) $(targetId).value = r.dir;
+  }
+  $('snowBrowse').onclick = () => browse('snowDirInput');
+  $('migrateBrowse').onclick = () => browse('migrateDir');
+  $('snowDirInput').oninput = async () => {
+    const dir = $('snowDirInput').value.trim(); if (!dir) { $('snowPickMsg').textContent = ''; return; }
+    try { const r = await api('/api/snowluma/inspect', { dir }); $('snowPickMsg').textContent = r.info.ok ? `✓ SnowLuma ${r.info.version}（${r.info.edition === 'full' ? '完整版' : 'Lite 版'}）` : r.info.error; } catch {}
+  };
+  $('snowUse').onclick = async () => {
+    const dir = $('snowDirInput').value.trim(); if (!dir) { toast('请先填写或浏览选择目录', 'bad'); return; }
+    const r = await act(() => api('/api/snowluma/select', { dir }));
+    if (r?.ok) { delete $('snowPick').dataset.forceShow; toast(`已选择 SnowLuma ${r.info.version}${r.homeDirSynced ? '，并同步了 config.json 的 snowluma.homeDir' : ''}`, 'ok'); refresh(); }
+  };
+  $('snowChange').onclick = () => { $('snowPick').dataset.forceShow = '1'; $('snowDirInput').value = S?.snowluma?.dir || ''; refresh(); };
+  $('snowStart').onclick = () => act(() => api('/api/snowluma/start', {}), 'SnowLuma 已启动。首次使用请打开它的 WebUI 扫码登录机器人 QQ');
+  $('snowStop').onclick = async () => { if (await confirmBox('停止 SnowLuma', '停止后机器人 QQ 会立刻收不到、也发不出消息。', '停止 SnowLuma')) act(() => api('/api/snowluma/stop', {}), 'SnowLuma 已停止'); };
+  $('snowOpenWebui').onclick = () => act(() => api('/api/snowluma/open-webui', {}));
+  $('snowCheck').onclick = async () => {
+    const r = await act(() => api('/api/snowluma/check-update', {}));
+    if (r?.update) { showUpdate(r.update); toast(r.update.updateAvailable ? `有新版本 ${r.update.latest}` : `已是最新（${r.update.latest}）`, r.update.updateAvailable ? '' : 'ok'); }
+  };
+  function showUpdate(u) {
+    $('updatePanel').classList.add('show');
+    $('updTitle').textContent = u ? (u.updateAvailable ? `有新版本：${u.current} → ${u.latest}` : `当前 ${u.current}，最新 ${u.latest}`) : '更新助手';
+    $('updSummary').textContent = u?.publishedAt ? `发布时间：${new Date(u.publishedAt).toLocaleString()}` : '可以先点「检查更新」。';
+    $('updAsset').textContent = u?.suggestedAsset || 'SnowLuma-v<版本>-win-x64.zip（完整版，不要选 Lite）';
+    $('updNotesWrap').hidden = !u?.notes; $('updNotes').textContent = u?.notes || '';
+  }
+  $('snowUpdateHelper').onclick = () => { if ($('updatePanel').classList.contains('show')) $('updatePanel').classList.remove('show'); else showUpdate(S?.snowluma?.update); };
+  $('updDownload').onclick = () => act(() => api('/api/snowluma/open-download', {}));
+  $('migrateGo').onclick = async () => {
+    const toDir = $('migrateDir').value.trim(); if (!toDir) { toast('请选择新版本解压后的目录', 'bad'); return; }
+    if (!await confirmBox('迁移数据并切换', `把当前目录的 config/、data/${$('migrateLogs').checked ? '、logs/' : ''} 备份后复制到：\n${toDir}\n并把控制中心切换到新目录。旧目录不会被删除。`, '开始迁移')) return;
+    try {
+      const r = await api('/api/snowluma/migrate', { toDir, includeLogs: $('migrateLogs').checked });
+      $('migrateResult').textContent = `✓ 已从 ${r.from} 迁移到 ${r.to}；备份在 ${r.backupDir}。现在可以点「启动 SnowLuma」试一下，确认账号正常后再删除旧目录。`;
+      toast('迁移完成', 'ok');
+    } catch (e) { $('migrateResult').textContent = `✗ ${e.message}`; toast(e.message, 'bad'); }
+    refresh();
+  };
+
+  // ── 轮询 ──
+  refresh(); bridgeLog.poll(); snowLog.poll();
+  setInterval(refresh, 2500);
+  setInterval(() => { bridgeLog.poll(); snowLog.poll(); }, 1000);
+})();
+</script>
+</body>
+</html>
