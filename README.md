@@ -35,7 +35,7 @@
 ```powershell
 npm install -g @deepseek-ai/dsh@0.2.0-rc.2   # DSH 锁定版本；之后在另一个窗口运行：dsh web
 npm ci
-npm run test:audit                            # 离线回归，应为 37/37
+npm run test:audit                            # 离线回归，应为 40/40
 Copy-Item config.example.json config.json     # 编辑 ownerQQ / allow / snowluma.*（见 docs/guides/CONFIGURATION.md）
 node scripts/setup-dsh.mjs                    # 装 preset、MCP、权限预设，然后重启 DSH
 npm run probe:permission                      # 部署后实测 DSH 权限行为（需 DSH 运行）
@@ -149,7 +149,7 @@ npm install        # 安装依赖（postinstall 会自动修补 @snowluma/sdk �
 
 | 字段 | 说明 |
 | --- | --- |
-| `dsh.baseUrl` | DSH Web 地址，默认 `http://127.0.0.1:3080` |
+| `dsh.baseUrl` | DSH Web 地址；留空（默认）= 自动识别：桌面版 `http://127.0.0.1:19387`，命令行版 `http://127.0.0.1:3080` |
 | `dsh.provider` / `dsh.model` / `dsh.reasoningEffort` | DSH 会话使用的模型/推理强度；若你的 DSH 没有示例中的模型，改成 DSH 设置页里可用的模型即可（选择失败只打日志，不阻塞启动） |
 | `dsh.authToken` | DSH launch token（进程启动凭据）。**通常应留空**：留空时桥接用 `~/.dsh/.credentials.yaml` 里持久化的签名密钥**离线铸造**会话 Cookie，不依赖任何进程期状态（DSH 0.1.7 起启动 token 只存在于内存、日志里那条是上一个进程的陈旧值，换 Cookie 只会 401）。只有显式填了才会优先走 token 交换 |
 | `dsh.authHeader` / `dsh.authPrefix` | 保留字段，当前新版 DSH 链路使用 Cookie 交换，不再直接发送该鉴权头 |
@@ -366,6 +366,8 @@ SnowLuma 同一个账号的 **HTTP token（默认 3000 端口）与 WebSocket to
 - **桥接每次启动的首次 WS 连接几乎必然失败一次**（日志里 `SnowLuma 连接断开（code=1006）` →
   `SnowLuma 首次连接未成功（将在后台自动重连并尝试自愈 WS token）`），随后自愈重新发现 WS token、
   重连成功，才打出 `SnowLuma 已连接`。**这条序列是正常的，不是故障。**
+  有的 SnowLuma 版本握手被拒时不发 close、只记一行 `SnowLuma 错误: … non-101 status code`，
+  这时由 v0.4.1 的连接看门狗兜底（10 秒起、最长 60 秒间隔重试并顺带自愈 token），同样会恢复。
 - 真正会一直连不上的情况：**自愈无从下手** —— `snowluma.homeDir` 没配 / 被移动 / 读不到
   SnowLuma 的 `config/onebot_<QQ号>.json`，或权限不足。这时日志里会有 `token 自愈失败`，
   而 QQ 侧表现为**完全收不到消息**。先确认 `homeDir` 指向真正的 SnowLuma 安装目录。

@@ -55,7 +55,7 @@ import {
 } from './sticker-lib.js';
 // v0.3.0：人际连续性（人物库/入群事件/跨群协作）与 owner 管理通道（模式切换/权限分级/审批增强）。
 // 业务规则全部在 src/social/* 与 src/admin/*，这里只接线。
-import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard } from './bridge-extensions.js';
+import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl } from './bridge-extensions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -624,7 +624,8 @@ function loadConfig() {
   if (!file || typeof file !== 'object' || Array.isArray(file)) throw new Error(`配置格式错误：${p}`);
   const cfg = {
     dsh: {
-      baseUrl: 'http://127.0.0.1:3080',
+      // 留空 = 自动识别（桌面版 19387 / 命令行版 3080，见 src/lib/dsh-endpoint.mjs）
+      baseUrl: '',
       provider: 'deepseek-official',
       // 多模态模型：DeepSeek-V41-Flash（DSH 模型目录里 inputModalities 含 image）。
       // 旧默认 deepseek-v4-flash-vision-exp 已被取代；config.json 未配置时用此兜底。
@@ -2280,7 +2281,12 @@ async function main() {
     log('ℹ️  socialV2.voice.allowAbsolutePath=true 已不再放宽 AI 通道：AI 发的语音始终只允许来自语音库（库外文件请用语音工具/CLI 发送）');
   }
 
-  // DSH 侧
+  // DSH 侧。dsh.baseUrl 留空时自动识别端口（桌面版写死 19387，命令行版默认 3080）。
+  {
+    const ep = await resolveDshBaseUrl(cfg.dsh.baseUrl);
+    if (ep.auto) log(`DSH 地址自动识别：${ep.url}${ep.reachable ? '' : '（暂时连不上，先按此地址重试；请确认 DSH 已启动）'}`);
+    cfg.dsh.baseUrl = ep.url;
+  }
   const api = new NodeApiClient(cfg.dsh.baseUrl, undefined, {
     token: cfg.dsh.authToken,
     // true=用户在 config.json 里显式填的；false=从日志猜的。猜来的不优先于离线铸造。
@@ -9007,10 +9013,8 @@ async function main() {
     }
     if (!accepted.result.ok) {
       if (opts.farewell) social.exitingSessions.delete(sessionId);
-      const errText = `${accepted.result.error.code}: ${accepted.result.error.message}`;
-      const safeErrText = shouldAuditKey(key) && SENSITIVE_RE.test(errText) ? '（含敏感信息，已隐藏）' : errText;
-      if (!opts.silent) await sendToQQ(key, `⚠️ 消息未被接受：${safeErrText}`);
-      return { ok: false, error: safeErrText };
+      const d = await reportAgentError(key, accepted.result.error, '消息未被接受', { silent: !!opts.silent });
+      return { ok: false, error: `${d.code}: ${d.detail}` };
     }
     if (wakeSnapshot && isCurrentSession(key, sessionId)
         && socialV2.conversations.get(canonicalV2Key(key)) === wakeState
@@ -10429,6 +10433,23 @@ async function main() {
    * 只认真实 QQ 消息里 ownerQQ 的回复，且必须在发起审批的同一会话里 —— 模型无法调用这里。
    * @returns {Promise<boolean>} 是否已作为审批回复处理（处理了就不再交给模型）
    */
+  // v0.4.1：DSH 错误统一处理 —— 写日志、QQ 里带错误码；缺凭据/余额不足/模型不可用时私聊提醒 owner（同一错误码 30 分钟一次）。
+  const agentErrorNotifiedAt = new Map();
+  async function reportAgentError(key, error, label, { silent = false } = {}) {
+    const d = describeAgentError(error, { secrets: [...KNOWN_AGENT_TOKENS] });
+    log(`⚠️ ${label} (${key}) ${d.logText}${d.hint ? ` —— ${d.hint}` : ''}`);
+    appendActivity(`${key} ${label}：${d.code}`);
+    if (!silent) await sendToQQ(key, agentErrorUserText(d, { audited: shouldAuditKey(key) }));
+    if (isConfigError(d) && !ext.isOwnerPrivateKey(key)) {
+      const last = agentErrorNotifiedAt.get(d.code) ?? 0;
+      if (Date.now() - last > 30 * 60 * 1000) {
+        agentErrorNotifiedAt.set(d.code, Date.now());
+        void sendOwnerDirect(`🚨 AI 无法正常回复（${key}，错误码 ${d.code}）：${d.hint}`);
+      }
+    }
+    return d;
+  }
+
   async function tryHandleApprovalReply(key, text, isOwner) {
     if (!isOwner) return false;
     const r = ext.approvals.resolveReply(key, text);
@@ -10834,9 +10855,7 @@ async function main() {
       content
     });
     if (!accepted.result.ok) {
-      const errText = `${accepted.result.error.code}: ${accepted.result.error.message}`;
-      const safeErrText = shouldAuditKey(key) && SENSITIVE_RE.test(errText) ? '（含敏感信息，已隐藏）' : errText;
-      await sendToQQ(key, `⚠️ 消息未被接受：${safeErrText}`);
+      await reportAgentError(key, accepted.result.error, '消息未被接受');
       return;
     }
     if (accepted.result.value.command) {
@@ -11427,9 +11446,8 @@ async function main() {
                   await sendToQQ(key, plain);
                 }
               } else if (ended.reason.kind === 'error') {
-                const msg = ended.reason.error?.message ?? '未知错误';
-                const safeMsg = shouldAuditKey(key) && SENSITIVE_RE.test(msg) ? '（含敏感信息，已隐藏）' : msg.slice(0, 500);
-                await sendToQQ(key, `⚠️ agent 处理出错：${safeMsg}`);
+                // v0.4.1：写日志（错误码 + 脱敏详情），QQ 里带错误码；配置类错误私聊提醒 owner（见 reportAgentError）。
+                await reportAgentError(key, ended.reason.error, '回合出错');
                 if (isFarewell) {
                   const st = socialState(key);
                   if (st.phase === 'exiting') {
@@ -11725,20 +11743,23 @@ async function main() {
   }
 
   let tokenHealAt = 0;
+  /** @returns {Promise<boolean|null>} true = 自愈改了 token/端点并已触发重连；false = 没变化；null = 没执行（节流/失败） */
   async function healTokenIfStale(reason) {
     const now = Date.now();
-    if (now - tokenHealAt < 10000) return;   // 节流：close 事件会连续触发
+    if (now - tokenHealAt < 10000) return null;   // 节流：close / error 事件会连续触发
     tokenHealAt = now;
     try {
       const r = await discoverSnowLumaConnection({ cfg, timeoutMs: 4000 });
       if (!r.ok) {
         log(`⚠️ token 自愈失败（${reason}）：${r.error}`);
-        return;
+        return null;
       }
-      await applyHealedTokens(r);
+      const changed = await applyHealedTokens(r);
       log(`   自愈完成：账号 ${r.self?.user_id ?? '?'}（${reason}）`);
+      return !!changed;
     } catch (error) {
       log(`⚠️ token 自愈异常：${error?.message ?? error}`);
+      return null;
     }
   }
 
@@ -11750,15 +11771,38 @@ async function main() {
     // config.json 里存的是前者，WS 需要用自愈发现的那个（详见 bot.connect() 处的说明）。
     void healTokenIfStale(`close code=${info?.code ?? '?'}`);
   });
-  bot.on('error', (error) => log('SnowLuma 错误:', error));
+  bot.on('error', (error) => {
+    log('SnowLuma 错误:', error?.message ?? error);
+    // v0.4.1：Node 内置 WebSocket 在握手被拒（non-101，例如拿 HTTP token 去连 WS 端口）时
+    // 实测只触发 'error'、不触发 'close' —— 只挂在 'close' 上的自愈永远不会执行。这里同样触发
+    // （healTokenIfStale 自带 10 秒节流，和 'close' 重复触发无害）。SDK 在这种情况下也不会自己重连，
+    // 由下面的连接看门狗兜底。感谢部署实测发现这个问题。
+    if (!bot.isConnected) void healTokenIfStale(`error: ${error?.message ?? 'unknown'}`);
+  });
+
+  // v0.4.1 连接看门狗：未连接时按 10 秒起、最长 60 秒的间隔重连（见 src/lib/ws-watchdog.mjs）。
+  // 覆盖「SDK 等不到 close 而不重连」「先启动桥接、后启动 SnowLuma」「自愈没有发现变化」这几种卡死情况。
+  const snowlumaWatchdog = createReconnectWatchdog({
+    isConnected: () => !!bot.isConnected,
+    log,
+    reconnect: async () => {
+      const healed = await healTokenIfStale('看门狗');
+      if (healed === true || bot.isConnected) return; // 自愈已改参数并重连 / 期间已经连上
+      try { bot.close(1000, 'watchdog-reconnect'); } catch {}
+      bot.connect().catch(() => {}); // 失败会再触发 error / close，看门狗下一轮继续
+    },
+  });
+  bot.on('open', () => snowlumaWatchdog.onConnected());
+  snowlumaWatchdog.start();
 
   // SnowLuma 尚未就绪时不阻塞桥接启动：SDK 自带后台重连，DSH 侧照常连接。
   bot.connect().catch((error) => {
     // 说明为什么"第一次连不上"在这里几乎是**必然**的，避免用户把它当成故障：
     // SnowLuma 的 **HTTP token（默认 3000）与 WS token（默认 3001）是两个不同的值**
     // （实测：同一个账号，两者不同；config.json 只能存一个，存的是 HTTP 那个）。
-    // 所以 WS 首次连接通常会被拒 → close(1006) → 触发 token 自愈（重新发现 WS token）
-    // → 重连成功后才是「SnowLuma 已连接」。若 homeDir 没配/被移动/读不到 SnowLuma 的
+    // 所以 WS 首次连接通常会被拒 → 触发 token 自愈（重新发现 WS token）→ 重连成功后才是「SnowLuma 已连接」。
+    // 被拒时日志里可能是 close(1006)，也可能只有一条「SnowLuma 错误」（Node 内置 WebSocket 握手被拒时不发 close，
+    // v0.4.1 起 error 也会触发自愈，并由连接看门狗兜底重连）。若 homeDir 没配/被移动/读不到 SnowLuma 的
     // config/onebot_<QQ>.json，自愈就无从下手，这时才会一直连不上 —— 那种情况请查
     // 日志里的「token 自愈失败」与 config.json 的 snowluma.homeDir。
     log(`SnowLuma 首次连接未成功（将在后台自动重连并尝试自愈 WS token）: ${error?.message ?? error}`);

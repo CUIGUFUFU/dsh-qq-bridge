@@ -23,6 +23,8 @@ export { normalizeMemberNotice, processMemberEvent, joinWakeInstruction } from '
 export { checkCrossGroup, queryPresence, queryActivity } from './social/cross-group.js';
 export { resolveLevelPlan, permissionCommandSucceeded } from './admin/dsh-permission.js';
 export { L0_MODES, LEVEL_TEXT } from './admin/mode-control.js';
+export { createReconnectWatchdog } from './lib/ws-watchdog.mjs';
+export { describeAgentError, agentErrorUserText, isConfigError } from './lib/agent-errors.mjs';
 /** 斜杠命令守卫：不做自然语言识别，只判断「这是不是管理/特权命令」。 */
 export function parseOwnerCommandForGuard(text) {
   return parseOwnerCommand(text, { naturalLanguage: false });
@@ -350,3 +352,4 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
     normalizeGroupId,
   };
 }
+export { resolveDshBaseUrl, dshBaseUrlCandidates, detectDshDesktop } from './lib/dsh-endpoint.mjs';

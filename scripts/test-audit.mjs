@@ -66,6 +66,10 @@ const tests = [
   'test-agent-preset-patches.mjs',
   // v0.4.0 控制中心：目录识别、数据迁移、鉴权、子进程管理、固定命令集与 L6（只由用户点击启停 SnowLuma）。
   'test-control-center.mjs',
+  // v0.4.1 部署反馈：握手只发 error 的自愈 + 连接看门狗；DSH 回合错误可定位且不外泄；DSH 端口自动识别。
+  'test-snowluma-reconnect.mjs',
+  'test-agent-errors.mjs',
+  'test-dsh-endpoint.mjs',
 ];
 let failed = 0;
 for (const test of tests) {

@@ -27,6 +27,7 @@ import { createManagedProcess } from './managed-process.mjs';
 import { inspectSnowLumaDir, snowlumaLaunchSpec, checkSnowLumaUpdate, migrateSnowLumaData, pickFolderDialog, SNOWLUMA_RELEASES_PAGE } from './snowluma-install.mjs';
 import { redactCredentials, redactKnown } from '../lib/redact.mjs';
 import { atomicWriteJsonFile, readJsonFile } from '../lib/json-store.js';
+import { resolveDshBaseUrl } from '../lib/dsh-endpoint.mjs';
 
 const DEFAULT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 // 路径都按「项目根目录」计算；离线测试可以传入临时根目录（见 scripts/test-control-center.mjs）。
@@ -200,7 +201,8 @@ export async function startControlCenter({ open = true, port: portOverride = nul
     if (cfg.valid) {
       try { out.bridgeApi = await bridgeApi('/api/status'); } catch (e) { out.bridgeApiError = String(e?.message ?? e); }
     }
-    const dshUrl = String(cfg.value?.dsh?.baseUrl ?? 'http://127.0.0.1:3080');
+    // dsh.baseUrl 留空 = 自动识别（桌面版 19387 / 命令行版 3080）
+    const dshUrl = (await resolveDshBaseUrl(cfg.value?.dsh?.baseUrl ?? '', { timeoutMs: 400 })).url;
     try {
       const u = new URL(dshUrl);
       out.dsh = { url: dshUrl, reachable: await portOpen(Number(u.port) || 80, u.hostname === 'localhost' ? '127.0.0.1' : u.hostname) };

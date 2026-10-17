@@ -24,7 +24,25 @@ import { BUNDLE_DIR, PRESETS, buildPatches, patchFileFor } from './build-agent-p
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
-const PROFILE = process.argv[2] || 'web';
+// v0.4.1：没有指定 profile 时自动识别。DSH 桌面版（0.2.0-rc.2）固定运行 `desktop` profile
+// （安装包里写死；部署实测装到 web 上不生效），命令行版 `dsh web` 用 `web`。
+function detectProfile() {
+  const profilesDir = path.join(DSH_HOME, 'profiles');
+  const has = (p) => fs.existsSync(path.join(profilesDir, p));
+  const desktopInstalled = (() => {
+    try {
+      return fs.readdirSync(path.join(DSH_HOME, 'dsh-runtimes')).some((d) => {
+        try { return !!JSON.parse(fs.readFileSync(path.join(DSH_HOME, 'dsh-runtimes', d, 'runtime.json'), 'utf8')).desktopVersion; } catch { return false; }
+      });
+    } catch { return false; }
+  })();
+  if (has('desktop') && !has('web')) return { profile: 'desktop', why: '只存在 desktop profile（DSH 桌面版）' };
+  if (has('web') && !has('desktop')) return { profile: 'web', why: '只存在 web profile（命令行版 dsh web）' };
+  if (has('desktop') && has('web')) return desktopInstalled ? { profile: 'desktop', why: '两个 profile 都存在且检测到桌面版；只用命令行版时请显式传 web' } : { profile: 'web', why: '两个 profile 都存在，未检测到桌面版' };
+  return desktopInstalled ? { profile: 'desktop', why: '检测到 DSH 桌面版' } : { profile: 'web', why: '默认' };
+}
+const PROFILE_DETECTED = process.argv[2] ? null : detectProfile();
+const PROFILE = process.argv[2] || PROFILE_DETECTED.profile;
 
 // A profile is a directory name, never a path (same boundary as DSH itself).
 if (PROFILE === '.' || PROFILE === '..' || PROFILE === 'node_modules'
@@ -35,6 +53,7 @@ if (PROFILE === '.' || PROFILE === '..' || PROFILE === 'node_modules'
 function log(msg) {
   console.log(`[setup-dsh] ${msg}`);
 }
+if (PROFILE_DETECTED) log(`未指定 profile，自动选择 ${PROFILE}（${PROFILE_DETECTED.why}）`);
 
 function fatal(msg) {
   console.error(`[setup-dsh] ERROR: ${msg}`);
@@ -379,19 +398,24 @@ function autoInstallProfileBundles() {
     return;
   }
   const windows = process.platform === 'win32';
+  // v0.4.1：PATH 里没有 dsh 时（DSH 桌面版的常见情况），改用桌面版自带的 CLI（版本与桌面版一致）。
+  const desktopCli = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'DeepSeek Harness', 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd');
+  const onPath = (name) => String(process.env.PATH ?? '').split(path.delimiter).some((d) => d && fs.existsSync(path.join(d, name)));
+  const cliPath = windows ? (onPath('dsh.cmd') ? 'dsh.cmd' : (fs.existsSync(desktopCli) ? desktopCli : 'dsh.cmd')) : 'dsh';
+  if (windows && cliPath === desktopCli) log(`PATH 里没有 dsh，使用 DSH 桌面版自带的 CLI：${desktopCli}`);
   // Node cannot spawn npm's .cmd shim directly. Keep the shell command constant;
   // the validated (no quotes/control chars) profile travels through one quoted
   // environment expansion, with delayed expansion disabled to preserve '!'.
   const cmd = windows ? (process.env.ComSpec || 'cmd.exe') : 'dsh';
   const args = windows
-    ? ['/d', '/v:off', '/s', '/c', 'dsh.cmd plugin --profile "%QQ_BRIDGE_SETUP_PROFILE%" install']
+    ? ['/d', '/v:off', '/s', '/c', '""%QQ_BRIDGE_DSH_CLI%" plugin --profile "%QQ_BRIDGE_SETUP_PROFILE%" install"']
     : ['plugin', '--profile', PROFILE, 'install'];
   const r = spawnSync(cmd, args, {
     encoding: 'utf8',
     timeout: 120000,
     windowsHide: true,
     windowsVerbatimArguments: windows,
-    ...(windows ? { env: { ...process.env, QQ_BRIDGE_SETUP_PROFILE: PROFILE } } : {}),
+    ...(windows ? { env: { ...process.env, QQ_BRIDGE_SETUP_PROFILE: PROFILE, QQ_BRIDGE_DSH_CLI: cliPath } } : {}),
   });
   if (r.error) {
     log(`auto-install failed to start/complete（${r.error.code || r.error.message}）。`);

@@ -1755,6 +1755,49 @@ button:active:not(:disabled) {
 #section-usage .usage-legend i.off { background:var(--accent) }
 #section-usage .usage-legend i.mixed { background:var(--accent-hover) }
 
+/* 人格快捷选择（v0.4.1）：输入框获得焦点时列出已有人格，按开头匹配过滤 */
+.role-combo {
+  position:relative;
+  flex:1 1 220px
+}
+.role-combo input {
+  width:100%
+}
+.role-suggest {
+  position:absolute;
+  z-index:30;
+  left:0;
+  right:0;
+  top:calc(100% + 4px);
+  margin:0;
+  padding:4px;
+  list-style:none;
+  max-height:240px;
+  overflow:auto;
+  background:var(--surface);
+  border:1px solid var(--border-strong);
+  border-radius:10px;
+  box-shadow:0 8px 24px rgba(32,46,73,.12)
+}
+.role-suggest li {
+  padding:7px 10px;
+  border-radius:7px;
+  cursor:pointer;
+  color:var(--text);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis
+}
+.role-suggest li[aria-selected="true"],
+.role-suggest li:hover {
+  background:var(--accent-soft-bg);
+  color:var(--accent-soft-fg)
+}
+.role-suggest li.role-suggest-empty {
+  cursor:default;
+  color:var(--muted-soft);
+  background:none
+}
 </style>
 </head>
 <body>
@@ -1880,7 +1923,10 @@ button:active:not(:disabled) {
         <summary>切换当前启用的人格</summary>
         <div class="settings-content">
           <div class="row" style="margin-top:10px">
-            <input type="text" id="roleInput" placeholder="选择已有角色或输入新角色名">
+            <div class="role-combo">
+              <input type="text" id="roleInput" placeholder="选择已有角色或输入新角色名" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="roleSuggest">
+              <ul id="roleSuggest" class="role-suggest" role="listbox" aria-label="已有人格" hidden></ul>
+            </div>
             <button id="roleSet">设置</button>
             <button id="roleClear">清除</button>
           </div>
@@ -3053,6 +3099,58 @@ document.getElementById('closedPreset').addEventListener('change', async () => {
   const mode = active ? active.dataset.mode : 'chat';
   await saveMode(mode);
 });
+// 人格快捷选择：只按「开头」匹配、不区分大小写；空输入列出全部。手动输入新名字仍然可以。
+function filterRoleSuggestions(names, query) {
+  const q = String(query ?? '').trim().toLowerCase();
+  return names.filter((name) => String(name).toLowerCase().startsWith(q));
+}
+(() => {
+  const input = document.getElementById('roleInput');
+  const list = document.getElementById('roleSuggest');
+  let items = [];
+  let active = -1;
+  const close = () => { list.hidden = true; active = -1; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); };
+  const highlight = (i) => {
+    active = i;
+    [...list.children].forEach((li, idx) => li.setAttribute('aria-selected', String(idx === i)));
+    const li = list.children[i];
+    if (li && li.id) { input.setAttribute('aria-activedescendant', li.id); li.scrollIntoView({ block: 'nearest' }); }
+  };
+  const pick = (name) => { input.value = name; close(); input.focus(); };
+  const open = () => {
+    items = filterRoleSuggestions(roleCache.map((role) => role.name), input.value);
+    list.replaceChildren();
+    if (!items.length) {
+      const li = document.createElement('li');
+      li.className = 'role-suggest-empty';
+      li.textContent = roleCache.length ? '没有以此开头的人格（可直接输入新名字）' : '还没有人格';
+      list.appendChild(li);
+    }
+    items.forEach((name, i) => {
+      const li = document.createElement('li');
+      li.id = 'roleSuggest-' + i;
+      li.setAttribute('role', 'option');
+      li.textContent = name;
+      // mousedown 而不是 click：避免输入框先失焦把菜单关掉
+      li.addEventListener('mousedown', (e) => { e.preventDefault(); pick(name); });
+      list.appendChild(li);
+    });
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    highlight(-1);
+  };
+  input.addEventListener('focus', open);
+  input.addEventListener('input', open);
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', (e) => {
+    if (list.hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { open(); e.preventDefault(); return; }
+    if (list.hidden) return;
+    if (e.key === 'ArrowDown' && items.length) { highlight((active + 1) % items.length); e.preventDefault(); }
+    else if (e.key === 'ArrowUp' && items.length) { highlight(active <= 0 ? items.length - 1 : active - 1); e.preventDefault(); }
+    else if (e.key === 'Enter' && active >= 0) { pick(items[active]); e.preventDefault(); }
+    else if (e.key === 'Escape') { close(); e.preventDefault(); }
+  });
+})();
 document.getElementById('roleSet').addEventListener('click', async () => {
   const r = await api('/api/role', 'POST', { role: document.getElementById('roleInput').value.trim() });
   if (r.ok) refreshRoles(); else alert(r.error || '设置失败');

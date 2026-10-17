@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from './dsh-client.js';
+import { resolveDshBaseUrl } from './lib/dsh-endpoint.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -36,7 +37,10 @@ async function cleanupSelfTestSession() {
 }
 
 async function main() {
-  const baseUrl = process.argv[2] ?? 'http://127.0.0.1:3080';
+  // 未给参数时按 config.json 的 dsh.baseUrl；留空则自动识别（桌面版 19387 / 命令行版 3080）
+  let cfgBase = '';
+  try { cfgBase = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8')).dsh?.baseUrl ?? ''; } catch {}
+  const baseUrl = process.argv[2] ?? (await resolveDshBaseUrl(cfgBase)).url;
   let auth;
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));

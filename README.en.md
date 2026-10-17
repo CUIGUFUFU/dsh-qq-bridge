@@ -60,7 +60,7 @@ Key settings:
 
 | Field | Description |
 | --- | --- |
-| `dsh.baseUrl` | DSH Web API URL, default `http://127.0.0.1:3080` |
+| `dsh.baseUrl` | DSH Web API URL; empty (default) = auto-detect: desktop app `http://127.0.0.1:19387`, CLI `http://127.0.0.1:3080` |
 | `dsh.authToken` | DSH launch token (a process-launch credential). **Normally leave this empty**: with no token the bridge mints the session cookie offline from the persistent signing key in `~/.dsh/.credentials.yaml`, which depends on no per-process state (since DSH 0.1.7 the launch token lives only in memory — the one in the old logs belongs to a previous process and only yields a 401). A value here is honoured first if you set one |
 | `dsh.authHeader` / `dsh.authPrefix` | Legacy fields kept for compatibility; the current path uses Cookie auth and does not send this header |
 | `snowluma.wsUrl` | SnowLuma OneBot **WebSocket** URL (e.g. `ws://127.0.0.1:3001`) |

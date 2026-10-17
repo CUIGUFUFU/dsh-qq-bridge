@@ -3,6 +3,37 @@
 本仓库（qq-bridge-enhanced）基于上游 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) `v0.2.0-r3`。
 上游更早的版本历史见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) 与上游 Release 页面。
 
+## v0.4.1 —— 2026-10-16
+
+根据第一次真实部署（DSH 桌面版 + SnowLuma + 新 QQ 号）的报告修复。
+
+### 修复
+- **SnowLuma 握手被拒后永远连不上**：有的 SnowLuma 版本拒绝 WS 握手时只触发 `error`、不触发 `close`，
+  SDK 的重连和桥接的 token 自愈都挂在 `close` 上，结果一直不连。现在 `error` 时（未连接）也触发自愈，
+  并新增**连接看门狗**（`src/lib/ws-watchdog.mjs`）：未连接时按 10 秒起、最长 60 秒的退避重试，连上即停。
+- **AI 出错时无从排查**：回合出错 / 消息未被接受时，原来只把一句话发到 QQ、不写日志，而且错误里带 credential 字样
+  会被整条替换成「含敏感信息，已隐藏」。现在（`src/lib/agent-errors.mjs`）：日志写**错误码 + 脱敏后的详情**；
+  QQ 上显示错误码（群聊等审计会话不显示原文）；缺凭据 / 余额不足 / 模型不可用这类**配置错误**私聊提醒 owner（30 分钟限频）。
+
+### 改进：DSH 桌面版开箱即用
+- `dsh.baseUrl` 默认留空 = **自动识别**：桌面版固定端口 `19387`，命令行版 `3080`（`src/lib/dsh-endpoint.mjs`）；
+  桥接、控制中心状态栏、`probe:permission`、`self-test` 都用同一套识别。显式填写的地址照用（已有配置不受影响）。
+- `setup-dsh.mjs` 自动识别 profile（桌面版 `desktop` / 命令行版 `web`），`dsh` 不在 PATH 时自动使用桌面版自带的 `dsh.cmd`
+  安装 profile bundle。
+- `control-center.bat` 找不到 Node.js 时给出提示并暂停；`control-center-hidden.vbs` 弹窗提示，不再静默失败。
+
+### 控制台
+- 「切换当前启用的人格」输入框：获得焦点时列出已有人格，输入时按**开头**过滤（不区分大小写），点击或 ↑↓ + 回车填入；仍可手动输入。
+
+### 文档
+- 部署指南：桌面版的 profile / 端口 / `dsh.cmd` 位置；新增「配置 DSH 模型凭据」一节（API Key → `deepseek-official`，
+  账号登录 → `deepseek-account`）；装好或更换 Node 后要重跑 setup；DSH 沙箱可能不允许在工作区写可执行文件；
+  `reasoningEffort` 的快慢取舍；「1006 正常」的说明补上 non-101 的情况；常见错误表新增三条。
+
+### 升级注意
+- 已经在 `config.json` 里写了 `dsh.baseUrl` 的保持不变即可；想用自动识别就改成 `""`。
+- 新增离线测试 `test-snowluma-reconnect` / `test-agent-errors` / `test-dsh-endpoint`，`test:audit` 现为 40 个脚本。
+
 ## v0.4.0 —— 2026-10-16
 
 ### 新增：控制中心（docs/guides/CONTROL_CENTER.md）
