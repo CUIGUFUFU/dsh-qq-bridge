@@ -62,7 +62,7 @@ async function bingSearch(query) {
   return { query, results };
 }
 
-const server = new McpServer({ name: 'web-search-safe', version: '0.4.1' });
+const server = new McpServer({ name: 'web-search-safe', version: '0.4.2' });
 
 server.tool(
   'web_search',

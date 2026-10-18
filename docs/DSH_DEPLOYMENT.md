@@ -1,4 +1,4 @@
-# DSH_DEPLOYMENT.md —— 给部署 agent 的完整部署说明（qq-bridge-enhanced v0.4.1）
+# DSH_DEPLOYMENT.md —— 给部署 agent 的完整部署说明（qq-bridge-enhanced v0.4.2）
 
 > **读者**：之后负责部署本项目的 DSH agent（或任何没有参与开发的人）。
 > **约定**：每一步都写明「在哪个目录执行 / 前置条件 / 预期结果」。命令默认在 **Windows PowerShell** 中执行；
@@ -22,7 +22,7 @@
 | 项 | 值 |
 | --- | --- |
 | 项目 | qq-bridge-enhanced：QQ（SnowLuma / OneBot v11）↔ DeepSeek Harness（DSH）桥接，把一个 QQ 账号变成 DSH agent 驱动的「AI 群友」 |
-| 版本 | **v0.4.1**（基于上游 Derpyu520/qq-bridge v0.2.0-r3） |
+| 版本 | **v0.4.2**（基于上游 Derpyu520/qq-bridge v0.2.0-r3） |
 | 操作系统 | **Windows 10/11 x64**（SnowLuma 只有 win-x64 / linux 版；本项目只在 Windows 上验证过启动脚本） |
 | Node.js | **≥ 22.13**（推荐 22 LTS 的最新小版本）|
 | DSH | **锁定 0.2.0-rc.2**：桌面版（`desktopVersion` 0.2.0-rc.2）或命令行版 `@deepseek-ai/dsh@0.2.0-rc.2` 均可。不要升级到 0.2.1-alpha 等更新版本 |
@@ -135,7 +135,7 @@ Test-NetConnection 127.0.0.1 -Port 3000   # 预期 TcpTestSucceeded : True（One
 
 ## 5. 获取 qq-bridge-enhanced
 
-二选一。下文把解压/克隆后的目录称为 **`<BRIDGE>`**（例如 `D:\qq-bridge-enhanced-v0.4.1`）。
+二选一。下文把解压/克隆后的目录称为 **`<BRIDGE>`**（例如 `D:\qq-bridge-enhanced-v0.4.2`）。
 **路径里不要有中文或空格**（避免批处理与 junction 的编码问题）。
 
 > 由 DSH agent 部署时：DSH 的沙箱可能**不允许在工作区里写入可执行文件或解压 ZIP**（报 EPERM / 拒绝访问）。
@@ -145,19 +145,19 @@ Test-NetConnection 127.0.0.1 -Port 3000   # 预期 TcpTestSucceeded : True（One
 
 ```powershell
 # 在想放置的父目录执行，例如 D:\
-$tag = "v0.4.1"
+$tag = "v0.4.2"
 $repo = "hxxhurundong/dsh-qq"
-Invoke-WebRequest -Uri "https://github.com/$repo/releases/download/$tag/qq-bridge-enhanced-v0.4.1.zip" -OutFile qq-bridge-enhanced-v0.4.1.zip
-Invoke-WebRequest -Uri "https://github.com/$repo/releases/download/$tag/qq-bridge-enhanced-v0.4.1.zip.sha256" -OutFile qq-bridge-enhanced-v0.4.1.zip.sha256
-(Get-FileHash .\qq-bridge-enhanced-v0.4.1.zip -Algorithm SHA256).Hash.ToLower()   # 应与 .sha256 文件里的值一致
-Expand-Archive .\qq-bridge-enhanced-v0.4.1.zip -DestinationPath .
-cd .\qq-bridge-enhanced-v0.4.1
+Invoke-WebRequest -Uri "https://github.com/$repo/releases/download/$tag/qq-bridge-enhanced-v0.4.2.zip" -OutFile qq-bridge-enhanced-v0.4.2.zip
+Invoke-WebRequest -Uri "https://github.com/$repo/releases/download/$tag/qq-bridge-enhanced-v0.4.2.zip.sha256" -OutFile qq-bridge-enhanced-v0.4.2.zip.sha256
+(Get-FileHash .\qq-bridge-enhanced-v0.4.2.zip -Algorithm SHA256).Hash.ToLower()   # 应与 .sha256 文件里的值一致
+Expand-Archive .\qq-bridge-enhanced-v0.4.2.zip -DestinationPath .
+cd .\qq-bridge-enhanced-v0.4.2
 ```
 
 **方式 B：git**
 
 ```powershell
-git clone --branch v0.4.1 https://github.com/hxxhurundong/dsh-qq.git qq-bridge-enhanced
+git clone --branch v0.4.2 https://github.com/hxxhurundong/dsh-qq.git qq-bridge-enhanced
 cd qq-bridge-enhanced
 ```
 

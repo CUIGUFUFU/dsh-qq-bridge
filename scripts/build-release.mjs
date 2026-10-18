@@ -6,7 +6,7 @@
 // config.json、state/、node_modules/、audio/、*.log、*.bak、TOTP 秘密、控制台令牌、SnowLuma 二进制等。
 //
 // 压缩用系统自带工具：Windows 10+ 的 tar.exe（bsdtar，`-a` 按扩展名生成 zip）；其它平台用 zip。
-// 用法：node scripts/build-release.mjs [--out dist]
+// 用法：node scripts/build-release.mjs [--out dist] [--include-untracked]
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -40,10 +40,15 @@ const FORBIDDEN = [
   /^SnowLuma[^/]*(\/|\.zip$)/i,
 ];
 
+// --include-untracked：连同「未跟踪但没被 .gitignore 忽略」的新文件一起打包（还没 git add 时用）。
+// 敏感文件检查对它们同样生效。
+const includeUntracked = process.argv.includes('--include-untracked');
+
 function listFiles() {
-  const git = spawnSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' });
+  const args = includeUntracked ? ['ls-files', '-z', '--cached', '--others', '--exclude-standard'] : ['ls-files', '-z'];
+  const git = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
   if (git.status === 0 && git.stdout) {
-    return { source: 'git ls-files', files: git.stdout.split('\0').filter(Boolean) };
+    return { source: includeUntracked ? 'git ls-files（含未跟踪的新文件）' : 'git ls-files', files: [...new Set(git.stdout.split('\0').filter(Boolean))] };
   }
   const files = [];
   const walk = (dir) => {
