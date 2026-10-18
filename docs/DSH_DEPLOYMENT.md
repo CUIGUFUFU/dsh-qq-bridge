@@ -174,7 +174,7 @@ npm run test:audit
 
 预期：
 - `npm ci` 末尾有 `[patch-snowluma] … 修补了 N 个文件` 与 `added … packages`；
-- `npm run test:audit` 最后一行 **`Audit suite: 40/40 scripts passed.`**（不需要 QQ、DSH 或网络）。
+- `npm run test:audit` 最后一行 **`Audit suite: 41/41 scripts passed.`**（不需要 QQ、DSH 或网络）。
   其中一条会打印 `⏭ 跳过：未找到 DSH 工具包` —— 这是正常的（没指定 DSH 安装目录时跳过工具名对账）。
 
 不通过：停止部署，把失败脚本的输出发给用户。

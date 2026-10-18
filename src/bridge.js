@@ -55,7 +55,7 @@ import {
 } from './sticker-lib.js';
 // v0.3.0：人际连续性（人物库/入群事件/跨群协作）与 owner 管理通道（模式切换/权限分级/审批增强）。
 // 业务规则全部在 src/social/* 与 src/admin/*，这里只接线。
-import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl } from './bridge-extensions.js';
+import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText } from './bridge-extensions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -752,7 +752,8 @@ function loadConfig() {
         getSelfImage: true,
         personProfile: true,
         requestMode: true,
-        crossGroup: true
+        crossGroup: true,
+        ownerRelay: false
       },
       wake: {
         defaultMode: 'diving',
@@ -873,6 +874,8 @@ function loadConfig() {
     requestMode: true,
     crossGroup: true,
     sendVoice: false,
+    // v0.4.2：管理员私聊托付群会话（默认关闭）
+    ownerRelay: false,
     ...(cfg.socialV2.tools ?? {})
   };
 
@@ -1337,6 +1340,9 @@ let stateDirHardened = null;
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 async function main() {
   const cfg = loadConfig();
+  // 管理员托付（方案 C）：托付内容只在内存里，按目标群会话暂存；限频跨所有托付共享。
+  const ownerRelayStore = createOwnerRelayStore();
+  const ownerRelayLimiter = createOwnerRelayLimiter();
   fs.mkdirSync(STATE_DIR, { recursive: true });
   hardenStateDirAcl();
   acquireLock();
@@ -4464,7 +4470,7 @@ async function main() {
             merged.autoReplyCheckMs = Number.isFinite(n) ? Math.max(1000, Math.round(n)) : (current.autoReplyCheckMs ?? 30000);
           }
           // tools：只接受布尔开关
-          const toolFlags = ['getPrompt', 'getUnread', 'getRecent', 'socialState', 'sendGroup', 'sendPrivate', 'reply', 'sendBurst', 'sendMessage', 'waitMessages', 'feedback', 'getMyRecent', 'getMessageDetail', 'getActiveMembers', 'setWakeConfig', 'markRead', 'memory', 'slangQuery', 'slangSubmit', 'getImages', 'getForwardMsg', 'sendPoke', 'listStickers', 'getStickerImage', 'sendSticker', 'setStickerRemark', 'stickerNote', 'collectSticker', 'getSelfImage', 'personProfile', 'requestMode', 'crossGroup', 'sendVoice'];
+          const toolFlags = ['getPrompt', 'getUnread', 'getRecent', 'socialState', 'sendGroup', 'sendPrivate', 'reply', 'sendBurst', 'sendMessage', 'waitMessages', 'feedback', 'getMyRecent', 'getMessageDetail', 'getActiveMembers', 'setWakeConfig', 'markRead', 'memory', 'slangQuery', 'slangSubmit', 'getImages', 'getForwardMsg', 'sendPoke', 'listStickers', 'getStickerImage', 'sendSticker', 'setStickerRemark', 'stickerNote', 'collectSticker', 'getSelfImage', 'personProfile', 'requestMode', 'crossGroup', 'ownerRelay', 'sendVoice'];
           if (body.tools && typeof body.tools === 'object') {
             merged.tools = { ...(current.tools ?? {}), ...body.tools };
             for (const k of toolFlags) {
@@ -4728,7 +4734,8 @@ async function main() {
             sendVoice: 'qq_send_voice / qq_list_voices',
             personProfile: 'qq_get_person / qq_note_person',
             requestMode: 'qq_request_mode_change',
-            crossGroup: 'qq_cross_group_query'
+            crossGroup: 'qq_cross_group_query',
+            ownerRelay: 'qq_ask_group_session'
           };
           const tools = cfg.socialV2?.tools ?? {};
           const stickerToolFlags = new Set(['listStickers', 'getStickerImage', 'sendSticker', 'setStickerRemark', 'stickerNote', 'collectSticker']);
@@ -6574,6 +6581,44 @@ async function main() {
             return;
           }
           sendJson({ ok: true, capability, targetGroupId: target, ...queryActivity(socialV2.conversations.get(`group:${target}`) ?? null) });
+          return;
+        }
+        // ── v0.4.2 AI 工具：管理员私聊托付群会话（方案 C，默认关闭）──
+        // 私聊会话不能直接往群里发（会话令牌只能发到自己的会话）；这里只把托付交给目标群**自己的**会话，
+        // 由它按群里的上下文自己组织语言、用自己的令牌发言。会话隔离本身不变。
+        if (req.method === 'POST' && url.pathname === '/api/socialV2/owner-relay') {
+          const body = await readBody();
+          const key = String(body.key ?? '').trim();
+          const agentToken = req.headers['x-agent-token'];
+          const relayCfg = ownerRelayConfig(cfg.socialV2?.ownerRelay);
+          const check = validateOwnerRelay({
+            fromKey: key,
+            tokenOk: !!agentToken && agentTokenOk(key, agentToken) && v2SessionAllowed(key),
+            isOwnerPrivateKey: ext.isOwnerPrivateKey,
+            isTargetAllowed: (targetKey) => v2SessionAllowed(targetKey),
+            // 默认关闭的风险工具：必须显式 true 才放行（不沿用 v2ToolEnabled 的「非 false 即开」）
+            enabled: cfg.socialV2?.tools?.ownerRelay === true,
+            targetGroupId: body.targetGroupId,
+            instruction: body.instruction,
+            maxChars: relayCfg.maxChars,
+          });
+          if (!check.ok) {
+            ext.audit.append('ownerrelay.reject', { from: key, to: String(body.targetGroupId ?? ''), reason: check.error });
+            sendJson({ ok: false, error: check.error }, check.status);
+            return;
+          }
+          if (SENSITIVE_RE.test(check.instruction)) { sendJson({ ok: false, error: '托付内容含敏感信息，已阻止' }, 403); return; }
+          if (shouldBlockSilentReply(check.targetKey)) { sendJson({ ok: false, error: '目标群开启了静默模式，当前不允许发言' }, 403); return; }
+          const limited = ownerRelayLimiter.take(check.targetKey, relayCfg);
+          if (limited) { sendJson({ ok: false, error: limited }, 429); return; }
+          ownerRelayStore.add(check.targetKey, check.instruction, relayCfg.ttlMs);
+          const busy = isConversationBusyV2(check.targetKey, getSocialV2State(check.targetKey));
+          scheduleWakeV2(check.targetKey, 'ownerRelay');
+          ext.audit.append('ownerrelay.accept', { from: key, to: check.targetKey, chars: check.instruction.length });
+          appendActivity(`${key} 托付 ${check.targetKey}：${check.instruction.slice(0, 60)}`);
+          log(`[reserved2] 管理员托付 ${check.targetKey}（${check.instruction.length} 字）`);
+          if (relayCfg.notifyOwner) void sendOwnerDirect(ownerRelayNoticeText(check.targetKey, check.instruction));
+          sendJson({ ok: true, targetKey: check.targetKey, message: ownerRelayResultText(check.targetKey, busy) });
           return;
         }
         // ── v0.3.0 控制台（管理端专用；带 agent token 的请求在上面的白名单关卡就已被 403）──
@@ -8991,6 +9036,8 @@ async function main() {
       wakeState = getSocialV2State(key);
       wakeToken = wakeState.agentToken;
       promptText = buildWakePromptV2(key, opts.wakeReason);
+      // 管理员托付在这次最终构建里已经写进提示词，取走，避免下次唤醒重复交代。
+      ownerRelayStore.take(key);
       wakeSnapshot = buildWakeSnapshotV2(key);
       if (wakeSnapshot) {
         promptText += `\n\n【本次消息快照】\n${JSON.stringify(wakeSnapshot)}\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
@@ -10024,7 +10071,16 @@ async function main() {
     return { purpose: 'reply', quietMs, remainingQuietMs: Math.max(0, quietMs - elapsedMs) };
   }
 
+  // 管理员托付（方案 C）：只要目标群会话有待处理的托付，任何原因的唤醒都会带上它；
+  // 托付在最终投递时才取走（见 deliverPrompt 里的 ownerRelayStore.take）。
   function buildWakePromptV2(key, reason) {
+    const relays = ownerRelayStore.peek(key);
+    if (reason === 'ownerRelay' && !relays.length) reason = '管理员托付已过期，按平常判断即可';
+    const text = buildWakePromptV2Core(key, reason);
+    return relays.length ? `${text}\n\n${ownerRelayPromptBlock(relays)}` : text;
+  }
+
+  function buildWakePromptV2Core(key, reason) {
     const roleState = readRoleState();
     const roleLine = roleState.role ? `【当前角色】${roleState.role}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
     const st = getSocialV2State(key);
@@ -10086,6 +10142,9 @@ async function main() {
     if (String(reason).startsWith('memberJoin')) {
       const category = String(reason).split(':')[1] || '';
       return `${base}【唤醒】${key}\n原因：有人加入了本群（见未读里的 [入群] 事件）。\n${joinWakeInstruction(category)}\n看完再决定：想打招呼就自然说一句；不想就安静收尾（qq_mark_read 或 qq_set_wake_config）。`;
+    }
+    if (reason === 'ownerRelay') {
+      return `${base}【唤醒】${key}\n原因：管理员在私聊里托付你在本群做一件事（见文末【管理员托付】）。\n先看看群里此刻在聊什么，再决定怎么开口最自然。`;
     }
     if (reason === 'poke') {
       return `${base}【唤醒】${key}\n原因：有人拍了一拍（可能拍了你，也可能拍了别人）。\n先看未读/最近消息里的 [拍一拍] 事件：如果是拍你，可以自然回应一句，也可以用 qq_send_poke 回一个拍一拍；如果是拍别人，觉得有趣也可以接梗。除了回应，偶尔也可以主动戳一下正在聊的人/熟人，像真人手贱/提醒/逗一下，但别频繁。不想接就安静收尾（qq_mark_read 或 qq_set_wake_config）。`;
@@ -10237,6 +10296,7 @@ async function main() {
 
   const WAKE_PRIORITY = {
     private: 100,
+    ownerRelay: 95,
     atMention: 90,
     memberJoin: 85,
     question: 80,

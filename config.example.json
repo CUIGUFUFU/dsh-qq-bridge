@@ -211,7 +211,15 @@
       "personProfile": true,
       "requestMode": true,
       "crossGroup": true,
-      "sendVoice": false
+      "sendVoice": false,
+      "ownerRelay": false
+    },
+    "ownerRelay": {
+      "maxPerHour": 10,
+      "maxPerTargetPerHour": 5,
+      "maxChars": 300,
+      "ttlMs": 1800000,
+      "notifyOwner": true
     },
     "wake": {
       "defaultMode": "diving",

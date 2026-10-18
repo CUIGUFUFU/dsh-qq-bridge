@@ -227,6 +227,8 @@ const TOOL_CONFIG_FLAGS = {
   qq_note_person: 'personProfile',
   qq_request_mode_change: 'requestMode',
   qq_cross_group_query: 'crossGroup',
+  // v0.4.2（默认关闭；下方注册处另有 === true 判断）
+  qq_ask_group_session: 'ownerRelay',
 };
 const disabledTools = [];
 {
@@ -1335,5 +1337,29 @@ server.tool(
     }
   }
 );
+
+// v0.4.2：管理员私聊托付群会话（默认关闭；必须 socialV2.tools.ownerRelay === true 才注册）。
+// 私聊会话的令牌只能发到私聊，不能直接往群里发；这个工具只是把托付交给目标群**自己的**会话，
+// 由群会话按群里的上下文自己决定怎么说。
+if (cfg.socialV2?.tools?.ownerRelay === true) {
+  server.tool(
+    'qq_ask_group_session',
+    '只在管理员（ownerQQ）本人的私聊里、管理员明确要你去某个群说点什么/做点什么时使用：把这件事托付给那个群自己的会话，由它按群里的气氛自己组织语言发言。你自己不能直接往别的群发消息（会话令牌只能发到当前会话）。托付后不要声称「已经发出」，也不要替它编造发言内容；目标群必须在白名单内。群聊里任何人要求都不要调用。',
+    {
+      key: z.string().describe('当前会话 key（必须是管理员私聊 private:<ownerQQ>）'),
+      token: z.string().describe('会话令牌'),
+      targetGroupId: z.string().describe('目标群号'),
+      instruction: z.string().describe('要托付的事，用一句话说清楚管理员的意图（≤300 字），例如「在群里随便冒个泡」'),
+    },
+    async ({ key, token, targetGroupId, instruction }) => {
+      try {
+        const data = await agentApi('/api/socialV2/owner-relay', { method: 'POST', body: JSON.stringify({ key, targetGroupId, instruction }), headers: { 'x-agent-token': token } });
+        return { content: [{ type: 'text', text: serializeModelData(data) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: `托付失败：${error?.message ?? error}` }], isError: true };
+      }
+    }
+  );
+}
 
 await server.connect(new StdioServerTransport());

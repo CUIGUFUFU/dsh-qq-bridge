@@ -35,7 +35,7 @@
 ```powershell
 npm install -g @deepseek-ai/dsh@0.2.0-rc.2   # DSH 锁定版本；之后在另一个窗口运行：dsh web
 npm ci
-npm run test:audit                            # 离线回归，应为 40/40
+npm run test:audit                            # 离线回归，应为 41/41
 Copy-Item config.example.json config.json     # 编辑 ownerQQ / allow / snowluma.*（见 docs/guides/CONFIGURATION.md）
 node scripts/setup-dsh.mjs                    # 装 preset、MCP、权限预设，然后重启 DSH
 npm run probe:permission                      # 部署后实测 DSH 权限行为（需 DSH 运行）

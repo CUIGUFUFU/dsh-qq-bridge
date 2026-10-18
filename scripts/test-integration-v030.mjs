@@ -218,6 +218,37 @@ await test('AI 工具 qq_request_mode_change：只有 owner 私聊会话能登�
   });
 });
 
+await test('v0.4.2 AI 工具 qq_ask_group_session：默认关闭；只有 owner 私聊能托付白名单群；交给群会话自己唤醒，私聊令牌仍发不到群', async (h) => {
+  h.setMode('reserved2');
+  h.cfg.allow.private = [String(OWNER)];
+  const ownerSt = h.getSocialV2State(`private:${OWNER}`);
+  const groupSt = h.getSocialV2State(`group:${GROUP}`);
+  await withServer(h, async (server) => {
+    const hdr = (st) => ({ 'x-agent-token': st.agentToken, 'x-agent-call': '1' });
+    const relay = (st, from, target) => request(server, 'POST', '/api/socialV2/owner-relay', { body: { key: from, targetGroupId: String(target), instruction: '在群里随便冒个泡' }, headers: hdr(st) });
+    const off = await relay(ownerSt, `private:${OWNER}`, GROUP);
+    assert.equal(off.status, 403, '默认关闭');
+    assert.match(off.body.error, /未启用/);
+    h.cfg.socialV2.tools.ownerRelay = true;
+    const fromGroup = await relay(groupSt, `group:${GROUP}`, GROUP);
+    assert.equal(fromGroup.status, 403, '群会话不能托付');
+    const forged = await relay(groupSt, `private:${OWNER}`, GROUP);
+    assert.equal(forged.status, 403, '拿群令牌冒充 owner 私聊 key 也不行');
+    const outside = await relay(ownerSt, `private:${OWNER}`, GROUP2);
+    assert.equal(outside.status, 403, '白名单外的群不行');
+    const ok = await relay(ownerSt, `private:${OWNER}`, GROUP);
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.targetKey, `group:${GROUP}`);
+    assert.equal(groupSt.pendingWakeReason, 'ownerRelay', '安排的是目标群自己的会话唤醒');
+    assert.ok(/托付/.test(lastOwnerText(h)), '私聊通知了 owner');
+    // 隔离不变：私聊令牌仍然不能直接往群里发
+    const direct = await request(server, 'POST', '/api/send/group', { body: { groupId: String(GROUP), message: 'hi', token: ownerSt.agentToken }, headers: hdr(ownerSt) });
+    assert.equal(direct.status, 403, '私聊令牌直接发群仍被拒');
+    assert.ok(h.ext.audit.tail(20).some((e) => e.type === 'ownerrelay.accept' || e.event === 'ownerrelay.accept' || JSON.stringify(e).includes('ownerrelay.accept')), '记入审计');
+    if (groupSt.pendingWakeTimer) { clearTimeout(groupSt.pendingWakeTimer); groupSt.pendingWakeTimer = null; }
+  });
+});
+
 await test('控制台 /api/mode 经过控制器：closed-agent 默认 L2；L3 要 TOTP；/api/admin/status 可读', async (h) => {
   await withServer(h, async (server) => {
     const r = await request(server, 'POST', '/api/mode', { body: { mode: 'closed-agent' } });

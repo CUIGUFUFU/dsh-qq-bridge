@@ -3,6 +3,17 @@
 本仓库（qq-bridge-enhanced）基于上游 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) `v0.2.0-r3`。
 上游更早的版本历史见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) 与上游 Release 页面。
 
+## 未发布
+
+### 新增
+- **管理员私聊托付群会话**（`qq_ask_group_session`，默认关闭，开关 `socialV2.tools.ownerRelay`）：在私聊里让 AI「去某个群说两句」时，
+  私聊会话不能直接往群里发（会话令牌只能发到自己的会话，以前会报「令牌不对」）。现在它可以把这件事托付给那个群**自己的**会话，
+  由群会话看着群里的上下文自己组织语言发言；会话隔离不变。只有管理员私聊能托付，目标必须是白名单群，有限频、审计和私聊通知。
+  见 docs/guides/CONFIGURATION.md。
+
+### 修复
+- 控制台「切换当前启用的人格」的下拉列表被折叠面板裁掉、看不到下面的人格：列表改为在页面里展开，面板跟着变高，人格多时可以滚动。
+
 ## v0.4.1 —— 2026-10-16
 
 根据第一次真实部署（DSH 桌面版 + SnowLuma + 新 QQ 号）的报告修复。

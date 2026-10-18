@@ -70,6 +70,8 @@ const tests = [
   'test-snowluma-reconnect.mjs',
   'test-agent-errors.mjs',
   'test-dsh-endpoint.mjs',
+  // v0.4.2 管理员私聊托付群会话（方案 C）：只有 owner 私聊能托付白名单群，交给群会话自己发言，会话隔离不变。
+  'test-owner-relay.mjs',
 ];
 let failed = 0;
 for (const test of tests) {

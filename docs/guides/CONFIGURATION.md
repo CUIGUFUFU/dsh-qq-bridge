@@ -66,6 +66,25 @@ TOTP 秘密**不在** `config.json` 里：用 `npm run admin:totp-setup` 写入 
 | `requestMode` | `qq_request_mode_change` | 只在 owner 私聊会话里登记申请；不能执行、不能确认 |
 | `crossGroup` | `qq_cross_group_query` | 还需要 `crossGroup.enabled` 与链接授权 |
 
+## 管理员私聊托付群会话（v0.4.2，默认关闭）
+
+每个 QQ 会话（群、私聊）在 DSH 里是独立的 AI 会话，会话令牌只能发到自己的会话。所以你在私聊里说「去 X 群说两句」，
+私聊里的 AI 发不出去（以前会回答「令牌不对」）。打开这个工具后，私聊里的 AI 可以把这件事**托付**给 X 群**自己的**会话：
+桥接把托付交过去并唤醒它，由群会话看着群里的上下文自己组织语言、用自己的令牌发言。会话之间的隔离不变。
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `socialV2.tools.ownerRelay` | `false` | 开关，对应工具 `qq_ask_group_session`。必须显式设为 `true`；改动后重启 DSH 才会出现在工具列表里 |
+| `socialV2.ownerRelay.maxPerHour` | `10` | 每小时最多托付次数（全部群合计） |
+| `socialV2.ownerRelay.maxPerTargetPerHour` | `5` | 同一个群每小时最多托付次数 |
+| `socialV2.ownerRelay.maxChars` | `300` | 托付内容最长字数 |
+| `socialV2.ownerRelay.ttlMs` | `1800000` | 托付等待群会话处理的最长时间（30 分钟），过期丢弃 |
+| `socialV2.ownerRelay.notifyOwner` | `true` | 每次托付后桥接私聊告诉你转交了什么 |
+
+限制：只在二代仿真（reserved2）下可用；只有你本人私聊（`private:<ownerQQ>`）的会话能托付；目标只能是白名单里的群；
+目标群开着静默模式时拒绝；托付内容会过敏感信息过滤，只保存在内存里（不落盘）；每次托付或被拒都记入管理审计（`/audit`）。
+群会话按群里的情况决定怎么说；明显不合适的托付（比如会泄露私聊内容）它可以不做。
+
 ## 状态文件（`state/`，不入库）
 
 | 文件 | 内容 |

@@ -353,3 +353,4 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   };
 }
 export { resolveDshBaseUrl, dshBaseUrlCandidates, detectDshDesktop } from './lib/dsh-endpoint.mjs';
+export { OWNER_RELAY_DEFAULTS, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText } from './social/owner-relay.js';

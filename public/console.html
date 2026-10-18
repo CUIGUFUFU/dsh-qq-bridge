@@ -1764,13 +1764,11 @@ button:active:not(:disabled) {
   width:100%
 }
 .role-suggest {
-  position:absolute;
-  z-index:30;
-  left:0;
-  right:0;
-  top:calc(100% + 4px);
-  margin:0;
+  /* 在文档流内展开（不用 absolute）：外层 details.settings-group 是 overflow:hidden，浮层会被裁掉 */
+  margin:6px 0 0;
   padding:4px;
+  max-width:520px;
+  overscroll-behavior:contain;
   list-style:none;
   max-height:240px;
   overflow:auto;
@@ -1925,11 +1923,12 @@ button:active:not(:disabled) {
           <div class="row" style="margin-top:10px">
             <div class="role-combo">
               <input type="text" id="roleInput" placeholder="选择已有角色或输入新角色名" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="roleSuggest">
-              <ul id="roleSuggest" class="role-suggest" role="listbox" aria-label="已有人格" hidden></ul>
             </div>
             <button id="roleSet">设置</button>
             <button id="roleClear">清除</button>
           </div>
+          <!-- 放在行外、占正常文档流：外层折叠面板 overflow:hidden，浮层式下拉会被裁掉；在流内展开时面板跟着变高 -->
+          <ul id="roleSuggest" class="role-suggest" role="listbox" aria-label="已有人格" hidden></ul>
           <div class="meta">清空当前人格后，AI 只按「仿真提示词」行动，不扮演任何角色。</div>
         </div>
       </details>
@@ -2107,6 +2106,7 @@ button:active:not(:disabled) {
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="personProfile"> <span><b>qq_get_person / qq_note_person</b><span class="meta">按 QQ 号查看/记录人物档案（按共享策略过滤可见范围）</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="requestMode"> <span><b>qq_request_mode_change</b><span class="meta">只在管理员私聊里登记模式切换申请；不能执行、不能确认</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="crossGroup"> <span><b>qq_cross_group_query</b><span class="meta">跨群受控查询（还需 crossGroup.enabled 与链接授权）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="ownerRelay"> <span><b>qq_ask_group_session</b><span class="meta">管理员私聊里托付某个白名单群的会话去群里说话（默认关闭；由群会话自己组织语言发言，改动后需重启 DSH）</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getSelfImage"> <span><b>qq_get_self_image</b><span class="meta">查看自己的默认 Q 版形象图片</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="stickerNote"> <span><b>qq_sticker_note</b><span class="meta">给表情记录本地含义/标签/用法</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="setStickerRemark"> <span><b>qq_set_sticker_remark</b><span class="meta">修改 QQ 官方表情备注（默认禁用，慎用）</span></span></label>
