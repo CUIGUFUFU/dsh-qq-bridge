@@ -1,6 +1,6 @@
 # 如何发布到你自己的 GitHub 仓库与 Release
 
-> 本仓库**不会**自动推送到任何地方。以下步骤由你（仓库所有者）手动执行。示例仓库名 `hxxhurundong/dsh-qq`。
+> 本仓库**不会**自动推送到任何地方。以下步骤由你（仓库所有者）手动执行。示例仓库名 `h-D-ACE/dsh-qq`。
 
 ## 1. 发布前检查（在仓库根目录）
 
@@ -17,7 +17,7 @@ git status --short                 # 确认没有 config.json / state/ / node_mo
 ## 2. 推送源码
 
 ```powershell
-git remote add origin https://github.com/hxxhurundong/dsh-qq.git   # 已经设置过 origin 就跳过这一行
+git remote add origin https://github.com/h-D-ACE/dsh-qq.git   # 已经设置过 origin 就跳过这一行
 git push -u origin main
 git tag -a v0.4.0 -m "qq-bridge-enhanced v0.4.0"
 git push origin v0.4.0
@@ -31,25 +31,27 @@ git push origin v0.4.0
 npm run release:zip
 ```
 
-产物在 `dist/`：`qq-bridge-enhanced-v0.4.0.zip` 与 `qq-bridge-enhanced-v0.4.0.zip.sha256`。
+产物在**仓库外、与仓库同级**的 `release/` 文件夹（`<仓库>/../release/`，没有会自动创建；历次版本的包都放在这里，不占仓库目录）：
+`qq-bridge-enhanced-v<版本>.zip` 与 `qq-bridge-enhanced-v<版本>.zip.sha256`。要放到别处：`node scripts/build-release.mjs --out <目录>`。
+还没 `git add` 的新文件也要打进去时加 `--include-untracked`。
 脚本只打包 `git ls-files` 列出的已跟踪文件（因此天然排除 `.gitignore` 里的 `config.json`、`state/`、`node_modules/` 等），
 并在打包前做一次敏感文件检查（发现 `config.json`、`state/`、`*.log`、TOTP 秘密等会直接失败）。
 不在 git 仓库里运行时，脚本退回到内置的排除清单。
 
 ## 4. 创建 GitHub Release
 
-网页：仓库 → Releases → Draft a new release → 选择标签 `v0.4.0` → 标题 `qq-bridge-enhanced v0.4.0` →
-正文粘贴 `docs/release/RELEASE_NOTES_v0.4.0.md` 的内容 → 上传 `dist/` 下的两个文件 → Publish。
+网页：仓库 → Releases → Draft a new release → 选择标签 `v<版本>`（例如 `v1.0.0`）→ 标题 `qq-bridge-enhanced v<版本>` →
+正文粘贴 `docs/release/RELEASE_NOTES_v<版本>.md` 的内容 → 上传 `../release/` 下这个版本的两个文件 → Publish。
 
 或用 GitHub CLI：
 
 ```powershell
-gh release create v0.4.0 dist/qq-bridge-enhanced-v0.4.0.zip dist/qq-bridge-enhanced-v0.4.0.zip.sha256 `
-  --repo hxxhurundong/dsh-qq --title "qq-bridge-enhanced v0.4.0" --notes-file docs/release/RELEASE_NOTES_v0.4.0.md
+gh release create v1.0.0 ../release/qq-bridge-enhanced-v1.0.0.zip ../release/qq-bridge-enhanced-v1.0.0.zip.sha256 `
+  --repo h-D-ACE/dsh-qq --title "qq-bridge-enhanced v1.0.0" --notes-file docs/release/RELEASE_NOTES_v1.0.0.md
 ```
 
 **不要**把 SnowLuma 的安装包、`node_modules`、你的 `config.json` 或 `state/` 作为 Release 附件上传。
 
 ## 5. 发布后
 
-部署时把仓库地址 https://github.com/hxxhurundong/dsh-qq 和 `docs/DSH_DEPLOYMENT.md` 交给 DSH agent 即可。
+部署时把仓库地址 https://github.com/h-D-ACE/dsh-qq 和 `docs/DSH_DEPLOYMENT.md` 交给 DSH agent 即可。

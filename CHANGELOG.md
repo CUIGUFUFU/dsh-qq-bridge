@@ -15,6 +15,7 @@
 - macOS：`npm run mac-app` 生成无窗口启动 App；第一次读 NapCat 配置时允许「访问其他 App 的数据」。
 - 更新 / 备份时把 `interface-platform/state/`（接口平台的实例配置与令牌）一起带上。
 - 接口平台的版本号与项目统一（1.0.0），只在 `interface-platform/package.json` 一处维护；`test-platform` 检查两者一致。英文 README 同步更新。
+- 发布包（`npm run release:zip`）默认输出到仓库外、与仓库同级的 `release/` 文件夹（历次版本都放在这里，不占仓库目录）；`--out` 可改。
 
 ### macOS 无窗口启动、NapCat 扫码、日志用词
 - 新增 `npm run mac-app`：在本机生成「QQ Bridge 控制中心.app」（对应 Windows 的 `control-center-hidden.vbs`）：没有终端窗口和 Dock 图标，后台启动控制中心并打开页面；再次双击重新打开页面；页面上退出控制中心后 App 随之退出。生成的 .app 不入库。
@@ -147,7 +148,7 @@
 - `.gitignore` 与发布脚本排除 SnowLuma 目录与安装包。
 
 ### 文档
-- 部署指南补充**桌面版 DSH** 的路径（版本检测、端口、bundle 安装的替代办法），仓库地址改为 hxxhurundong/dsh-qq，日常启动改为控制中心。
+- 部署指南补充**桌面版 DSH** 的路径（版本检测、端口、bundle 安装的替代办法），仓库地址改为 h-D-ACE/dsh-qq，日常启动改为控制中心。
 
 ## v0.3.0 —— 2026-10-16
 

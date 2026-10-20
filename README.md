@@ -70,7 +70,7 @@
 
 > ⚠️ 与上游的行为差异：控制台/DSH 设置/QQ 的模式变更都会通知 owner；未经管理通道授权的 closed-agent 不能建会话
 >（从上游升级时若停在 closed-agent，会回落到 reserved2 并告警）；审批改为编号制。详见 CHANGELOG「变更」。
-> 下文上游文档中 `git clone https://github.com/Derpyu520/qq-bridge.git` 的地方，请换成本仓库地址（https://github.com/hxxhurundong/dsh-qq）或使用 Release ZIP；
+> 下文上游文档中 `git clone https://github.com/Derpyu520/qq-bridge.git` 的地方，请换成本仓库地址（https://github.com/h-D-ACE/dsh-qq）或使用 Release ZIP；
 > 上游文档按「桥接直连 SnowLuma、DSH 固定端口 3080」写，那条路仍然可用，但推荐用上面的控制中心 + 接口平台。
 
 ---

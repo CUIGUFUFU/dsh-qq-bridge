@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// 生成 GitHub Release 用的 ZIP：dist/qq-bridge-enhanced-v<版本>.zip（+ .sha256）。
+// 生成 GitHub Release 用的 ZIP：qq-bridge-enhanced-v<版本>.zip（+ .sha256）。
+// 默认放在**仓库外**、与仓库同级的 release/ 文件夹（<仓库>/../release/），不占仓库目录；`--out <目录>` 可改（相对仓库根目录）。
 //
 // 打包范围：git 仓库里 `git ls-files` 列出的已跟踪文件（天然遵守 .gitignore）；不在 git 仓库里时
 // 退回到「遍历目录 + 内置排除清单」。无论哪种方式，打包前都会做敏感文件检查，命中即失败：
 // config.json、state/、node_modules/、audio/、*.log、*.bak、TOTP 秘密、控制台令牌、SnowLuma 二进制等。
 //
 // 压缩用系统自带工具：Windows 10+ 的 tar.exe（bsdtar，`-a` 按扩展名生成 zip）；其它平台用 zip。
-// 用法：node scripts/build-release.mjs [--out dist] [--include-untracked]
+// 用法：node scripts/build-release.mjs [--out <目录>] [--include-untracked]
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -18,7 +19,8 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const version = pkg.version;
 const name = `qq-bridge-enhanced-v${version}`;
 const outIdx = process.argv.indexOf('--out');
-const outDir = path.resolve(root, outIdx > 0 ? process.argv[outIdx + 1] : 'dist');
+const outDir = path.resolve(root, outIdx > 0 ? process.argv[outIdx + 1] : path.join('..', 'release'));
+fs.mkdirSync(outDir, { recursive: true });
 
 const EXCLUDE_DIRS = new Set(['node_modules', 'state', 'audio', 'dist', '.git', '.npm-cache', '.claude']);
 const EXCLUDE_PREFIXES = ['docs/audits/', 'docs/design/', 'docs/legacy/', 'docs/research/'];
