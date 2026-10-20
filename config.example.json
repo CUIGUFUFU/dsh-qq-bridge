@@ -17,6 +17,7 @@
     "httpUrl": "http://127.0.0.1:3000",
     "accessToken": "",
     "followDiscoveredEndpoint": true,
+    "viaPlatform": false,
     "silenceWarnMs": 600000,
     "launcherPath": "",
     "homeDir": ""
@@ -212,7 +213,8 @@
       "requestMode": true,
       "crossGroup": true,
       "sendVoice": false,
-      "ownerRelay": false
+      "ownerRelay": false,
+      "ownerGroupAccess": false
     },
     "ownerRelay": {
       "maxPerHour": 10,
@@ -289,6 +291,7 @@
       "maxListCount": 100,
       "includeInPrompt": true,
       "promptMaxStickers": 8,
+      "maxBytes": 10485760,
       "collect": {
         "enabled": true,
         "maxPerMinute": 2,
@@ -328,6 +331,23 @@
       "wakeMessageLimit": 12,
       "wakeRecentLimit": 4,
       "wakeMaxChars": 6000
+    },
+    "initialPromptMaxChars": 2000,
+    "media": {
+      "maxBytes": 8388608,
+      "maxPixels": 64000000,
+      "maxCount": 5
     }
+  },
+  "webSearch": {
+    "provider": "auto",
+    "apiKey": "",
+    "apiKeyEnv": "DEEPSEEK_API_KEY",
+    "baseURL": "",
+    "model": "deepseek-v4-flash",
+    "maxUses": 5,
+    "maxTokens": 4096,
+    "maxResults": 8,
+    "timeoutMs": 35000
   }
 }

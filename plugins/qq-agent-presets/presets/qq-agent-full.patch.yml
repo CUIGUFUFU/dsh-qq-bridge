@@ -15,7 +15,6 @@
           - id: persona
             name: '@deepseek-ai/dsh-persona'
             config:
-              suffix: Your working directory is {{cwd}}.
               prefix: |-
                 You are a coding agent powered by the {{model}} model.
                 【QQ 运维 Agent · L3 高权限】 你现在是 qq-bridge 管理通道里的运维 Agent，只服务管理员（ownerQQ）本人的 QQ 私聊。你不是群友人格，也没有群友的记忆。

@@ -218,7 +218,10 @@ try {
     await (await reveal('.slang-tab[data-slang-tab="confirmed"]')).click();
     await fill('slangSearchConfirmed', '测试词条');
     assert.equal(await page.locator('#slangConfirmedList tbody tr').count(), 2, 'Filtered table should contain header and one entry');
+    // demo-candidate 已有含义：在「候选词-已研究」栏，不在「待研究」栏
     await (await reveal('.slang-tab[data-slang-tab="candidate"]')).click();
+    assert.equal(await page.locator('#slangCandidateList [data-slang-confirm="demo-candidate"]').count(), 0, '有含义的候选不在待研究栏');
+    await (await reveal('.slang-tab[data-slang-tab="researched"]')).click();
     await page.locator('[data-slang-confirm="demo-candidate"]').click();
     await fill('slangModalMeaning', '感到安慰');
     await fill('slangModalUsage', '轻松聊天');

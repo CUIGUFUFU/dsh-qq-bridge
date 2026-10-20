@@ -3,6 +3,89 @@
 本仓库（qq-bridge-enhanced）基于上游 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) `v0.2.0-r3`。
 上游更早的版本历史见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) 与上游 Release 页面。
 
+## v1.0.0 —— 2026-10-19
+
+第一个正式版本：支持 **Windows 与 macOS**；新增**接口平台**（桥接经它接入 QQ 后端，可同时接 SnowLuma 与 NapCat）；
+控制中心统一管理桥接、接口平台与 QQ 后端（两边都有无窗口启动入口）；兼容 DSH 0.2.0-rc.2 与 0.2.1；增量合入上游 r4 的修复。
+发布说明：[docs/release/RELEASE_NOTES_v1.0.0.md](docs/release/RELEASE_NOTES_v1.0.0.md)。
+
+### 升级注意（从 v0.4.2）
+- 沿用 `config.json` 与 `state/`；执行 `npm ci`，**重跑 `node scripts/setup-dsh.mjs` 并重启 DSH**（preset 去掉了 `{{cwd}}`，DSH 0.2.1 需要）。
+- 想经接口平台收发：控制中心 → 接口平台 → 开启后端 →「设置 → 接入桥接」→ 重启桥接。不接入时桥接照旧直连 SnowLuma。
+- macOS：`npm run mac-app` 生成无窗口启动 App；第一次读 NapCat 配置时允许「访问其他 App 的数据」。
+- 更新 / 备份时把 `interface-platform/state/`（接口平台的实例配置与令牌）一起带上。
+- 接口平台的版本号与项目统一（1.0.0），只在 `interface-platform/package.json` 一处维护；`test-platform` 检查两者一致。英文 README 同步更新。
+
+### macOS 无窗口启动、NapCat 扫码、日志用词
+- 新增 `npm run mac-app`：在本机生成「QQ Bridge 控制中心.app」（对应 Windows 的 `control-center-hidden.vbs`）：没有终端窗口和 Dock 图标，后台启动控制中心并打开页面；再次双击重新打开页面；页面上退出控制中心后 App 随之退出。生成的 .app 不入库。
+- NapCat 登录二维码直接显示在控制中心：NapCat 由控制中心启动、未登录且生成了新二维码时，开启卡提示、程序区显示二维码（`GET /api/napcat/qrcode`，需令牌、文件位置固定、只给 PNG），登录后自动消失。NapCat 日志里同时插入二维码小图，换新后旧图标「已过期」；下载日志不含图片数据。
+- NapCat 程序区更好找：开启卡上加「管理 NapCat 程序 →」；接口平台没运行时实例列表里也有「本机 NapCat 程序」。
+- 桥接日志按实际后端称呼：经接口平台时写「QQ 后端（经接口平台 · NapCat 4.18.38）已连接」，不再一律写「SnowLuma 已连接」（`src/lib/qq-backend-label.js`）。
+- 离线测试：`test-qq-backend-label.mjs`、`test-mac-app.mjs`，`test-napcat-manage.mjs` 补二维码。
+
+### NapCat 管理：版本、检查更新、目录与启动文件
+- 控制中心的 NapCat 程序区显示版本（运行中由 NapCat 经 `get_version_info` 自报；Windows 也可从安装文件读）、「检查更新」（只读 GitHub 最新 Release，只提示不下载）、「打开下载页」（macOS → Mac 安装器）。
+- 新增「NapCat 设置」：QQ.app（macOS）/ 启动文件（Windows）、NapCat 目录、快速登录 QQ 号，带校验；改目录同步给接口平台的 NapCat 实例。不用再手改 `state/control-center.json`。
+- 「浏览…」改用系统原生窗口模块 `src/launcher/pick-dialog.mjs`：macOS 用 osascript，Windows 用 PowerShell；标题与路径经 argv / 环境变量传入，不拼进脚本。只接受固定用途（`/api/pick`）。SnowLuma 的「浏览…」在 macOS 上也能用。
+- 接口平台：链路连上后调用一次 `get_version_info`，在链路快照里给出 `backend: { appName, appVersion, protocolVersion }`。
+- 离线测试 `scripts/test-napcat-manage.mjs`（接入 test:audit）。
+
+### 接口平台并入仓库
+- `interface-platform/` 从与桥接平行的目录搬进本仓库，作为独立子程序（自己的 `package.json`、测试与 `state/`）；`state/` 不入库，发布包随 `git ls-files` 自动包含平台。
+- 控制中心默认按 `<仓库>/interface-platform` 找平台，旧布局（同级 `../interface-platform`）仍然认；`platformDir` 与 `QQ_BRIDGE_PLATFORM_DIR` 不变。
+- `test-platform.mjs` 找不到平台改为失败（不再跳过），新增 ⑥：桥接与平台互不导入对方的模块、`.gitignore` 排除平台 `state/`。
+- 离线测试用 `QQ_BRIDGE_NAPCAT_HOME` 指向假目录，不再读真实 NapCat 目录（macOS 上那会弹「访问其他 App 的数据」并卡住测试）。`.DS_Store` 加入 `.gitignore`。
+
+### 控制中心：状态栏与桥接控制台入口
+- 底栏 DSH 指示以桥接自己的连通结论（dshReady）为准，不再因为控制中心没探到 DSH 0.2.1 的随机端口而显示「不可达」；总体徽章同步。
+- 底栏「SnowLuma」改为「接入后端」：走接口平台时列出平台里各实例（如「NapCat 已连接」），桥接直连时才显示直连的 SnowLuma；版本行只在选了 SnowLuma 目录时显示其版本。
+- 「打开桥接控制台」从顶栏移到桥接卡片（启动桥接与重启之间），点击时自动带上桥接控制台令牌（经控制中心鉴权的 POST 取得，控制中心页面不保存）；旁边保留「手动输入令牌」。
+- 桥接控制台的令牌页会先用本机浏览器里上次保存的令牌自动试一次，失效或走手动入口时才弹窗。
+- 桥接控制台黑话库：「候选词」拆成「候选词-待研究」和「候选词-已研究」两栏（有含义 / 用法 / 示例之一即为已研究，标签上显示条数）；只是页面分栏，数据仍是候选，确认 / 拒绝 / 研究接口不变。
+- 新增 macOS 启动入口 `control-center.command`（双击在终端里打开）。从其他 App 里启动时，macOS 会以那个 App 的名义反复询问「访问其他 App 的数据」。
+- 接口平台：账号目录**读不了**（权限 / macOS 隐私保护）不再被当成「账号从目录消失」而断开链路，保留现有链路并在实例上报 `discoveryError`；只有目录里真的没了才关。
+  控制中心底栏「接入后端」改按真实链路（open）判断，读不到目录时显示原因。NapCat 自动登录设置的读取缓存 10 分钟，不再每次刷新都读沙盒容器。
+- NapCat 卡片识别 NapCat 自己的自动登录设置（`config/webui.json` 的 `autoLoginAccount`，只读）。
+
+### NapCat 下 AI 收藏表情
+- NapCat 的 `add_custom_face` 只接受本地文件路径（`base64://` 会报 ENAMETOOLONG），回执也不含 emoji_id。现在 base64 被拒且网关识别为 NapCat 时，
+  把桥接已校验的表情字节写进桥接自建的临时文件（随机名、0600，macOS 放在 QQ 沙盒容器的 tmp，用完即删）再交给它；按 MD5 在收藏列表里找到刚收藏的表情，
+  备注改用 NapCat 的 `set_custom_face_desc`。SnowLuma 的行为不变；消息里的原始 URL / AI 给的路径仍然不会交给网关。临时目录可用 `socialV2.sticker.collect.tempDir` 指定。
+
+### 兼容 DSH 桌面版 0.2.1-rc.2（同时保持兼容 0.2.0-rc.2）
+- **preset 不再使用 `{{cwd}}`**：0.2.1 的提示词变量只剩 provider / model，`suffix: Your working directory is {{cwd}}.` 会让每一轮直接报错
+  （`unknown prompt variable "{{cwd}}" in section "deployment:persona-suffix"`）。5 个 preset 都不再覆盖 suffix，改用当前 DSH 版本自带的默认后缀；已重新生成 bundle patch。
+- **自动发现 DSH 随机端口**：0.2.1 桌面版每次启动监听一个随机回环端口（不再写死 19387）。`dsh.baseUrl` 留空时，固定端口连不上就查 DSH 桌面版进程的监听端口
+  （macOS `lsof`，Windows `netstat` + `tasklist`），再用未登录 401 的特征文字确认是 DSH；DSH 不可用期间桥接每 10 秒重新识别，DSH 重启换端口后自动跟上。
+- **macOS 识别桌面版**：Mac 上没有 `~/.dsh/dsh-runtimes`，改读 App 包 Info.plist 的版本号；之前 DSH 还没起来时会被误判成命令行版（3080）。
+- Windows 上的 `netstat`/`tasklist` 发现路径只做了离线解析测试，尚未在 Windows 实机验证。
+
+### 合入上游 Derpyu520/qq-bridge v0.2.0-r4（增量合并，本仓库的增强功能全部保留）
+- **回合判忙租约**：回合只按「起始时间 + 15 分钟租约」判忙，turn/end 丢失或 DSH 重启丢回合时不再永久卡在「会话繁忙」（上游 #11/#19/#23/#26；本机 Mac 部署曾复现）。
+  本仓库另在控制台 `/api/socialV2/state` 增加只读的 `busy` 诊断字段。
+- **DSH 设置 user 层优先**：控制台切的模式不再被 5 秒轮询改回去（上游 #22）；DSH 设置页 ownerQQ 留空不再抹掉 config.json 的值。保留本仓库 v0.3.0 管理控制器的外部模式判定。
+- **机器人身份写进唤醒提示词**（昵称 + QQ 号，上游 #29），不再把 @自己 当成 @别人；引用旧消息里的昵称不算被叫到。
+- **会话初始提示词**：控制台为每个会话预写圈子主题/氛围（`state/initial-prompts.json`），只在首次唤醒注入；AI 读不到也改不了。
+- **图片/表情链路**：safe-fetch 校验全部 DNS 结果 + IPv4 优先 + 逐地址切换（修 AAAA 先返回时每次白等 20 秒）；表情优先走 CDN、按 emoji_id/文件名推 gxh 地址兜底；
+  落库保留 kind/emojiId/summary/subType。图片识别上限改为 `socialV2.media`（默认 8MB / 64MP / 5 张）。本仓库的表情上限 `socialV2.sticker.maxBytes`（10MB）照旧单独生效。
+- **联网搜索**：新增 `src/web-search.js`，优先复用 DSH 的 DeepSeek 联网搜索，Bing RSS 兜底（配置 `webSearch`）。
+- **稳定性**：`qq_wait_for_messages` 改走 `node:http` 长轮询（绕开 undici 300 秒 headersTimeout）、DSH 控制调用统一 15 秒超时、事件流重连指数退避；SnowLuma 对象形态的 error 拆出详情记日志。
+- **体检修复**：`/api/send/*` 失败路径的 ReferenceError、MCP 对象 error 显示成 `[object Object]`、md-to-plain 的 ReDoS 与「2 * 3 * 4」被当斜体删掉、表情/黑话按码点截断不切坏 emoji、搜索空结果提示被缓存吞掉。
+- 测试：移植上游 `test-audit-regressions`、`test-issue-regressions`、`test-media-search`、`test-v2-initial-prompt`，并接入 `test:audit`。
+- 未合入：上游各包的版本号（本仓库保持自己的版本号）。
+
+### 新增
+- **接口平台 M1**（仓库内的独立子程序 `interface-platform/`，零依赖，Windows / macOS 通用；桥接与控制中心只经 HTTP 接口与它通信）：统一管理接入实例、账号、事件与发送，后端是可替换的连接器。
+  本轮提供 QQ 的 SnowLuma 连接器（Windows）与 NapCat 连接器（macOS / Windows，连接用户自己安装的 NapCat；macOS 上已实机验证收发），都按目录自动发现每个账号；统一数据接口（`/v1`，SSE 事件流 + 带状态的发送请求）、
+  管理接口（`/v1/admin`，与数据令牌分离）和 OneBot v11 兼容入口（过渡层：桥接只改配置即可经过平台）。见 interface-platform/README.md 与 interface-platform/docs/CONTRACT.md。
+  **M1 不是完整交付**：Mac 原生 QQ（M3）、完整功能矩阵（M4）尚未实现；Windows 上经接口平台的实机链路尚未验收。
+- **控制中心改为顶部大标签**：「桥接」「接口平台」两个标签，切换只改变显示、不启停任何模块；接口平台页有概览、接入实例、账号、日志、设置。
+  SnowLuma 的目录选择、启停、更新助手移到「接口平台 → 接入实例」，仍然只由用户亲手点击。
+- **管理员私聊跨群查看与群长期规则**（`socialV2.tools.ownerGroupAccess`，默认关闭）：管理员本人私聊的 AI 可以只读查看白名单群的消息和记忆（`qq_owner_peek_group`），并给群设长期规则（`qq_owner_group_rule`，由桥接写进群会话记忆、每次唤醒注入）；群里发言仍走托付，会话隔离不变。
+- **`socialV2.sticker.maxBytes`**（默认 10MB，范围 256KB～40MB）：收藏 / 发送表情的单张大小上限单独可配；图片识别（含 `qq_get_sticker_image`）改用上游 r4 的 `socialV2.media.maxBytes`（默认 8MB）。
+- **`snowluma.viaPlatform`**：「接入桥接」一键把桥接端点改为平台兼容入口（原值备份在 `state/platform-link-backup.json`，可「恢复直连」）；
+  开启后 token 自愈不再扫描 SnowLuma 目录、不跟随发现到的端点，避免绕过平台直连。
+
 ## v0.4.2 —— 2026-10-17
 
 ### 新增

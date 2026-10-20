@@ -2,7 +2,7 @@
 
 > 根目录只留 `README.md` / `README.en.md` / `RULES.md`，以及 v0.3.0 起的发布类文档 `CHANGELOG.md` / `NOTICE.md`；其余全部在本目录下。
 >
-> **v0.3.0 增强版新增**：[DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md)（给部署 agent 的完整部署说明）· [guides/CONTINUITY.md](guides/CONTINUITY.md) · [guides/ADMIN_CHANNEL.md](guides/ADMIN_CHANNEL.md) · [guides/CONFIGURATION.md](guides/CONFIGURATION.md) · [guides/TESTING.md](guides/TESTING.md) · [release/RELEASE_NOTES_v0.3.0.md](release/RELEASE_NOTES_v0.3.0.md) · [release/PUBLISHING.md](release/PUBLISHING.md) · **v0.4.0**：[guides/CONTROL_CENTER.md](guides/CONTROL_CENTER.md) · [release/RELEASE_NOTES_v0.4.0.md](release/RELEASE_NOTES_v0.4.0.md)
+> **v0.3.0 增强版新增**：[DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md)（给部署 agent 的完整部署说明）· [guides/CONTINUITY.md](guides/CONTINUITY.md) · [guides/ADMIN_CHANNEL.md](guides/ADMIN_CHANNEL.md) · [guides/CONFIGURATION.md](guides/CONFIGURATION.md) · [guides/TESTING.md](guides/TESTING.md) · [release/RELEASE_NOTES_v0.3.0.md](release/RELEASE_NOTES_v0.3.0.md) · [release/PUBLISHING.md](release/PUBLISHING.md) · **v0.4.0**：[guides/CONTROL_CENTER.md](guides/CONTROL_CENTER.md) · [release/RELEASE_NOTES_v0.4.0.md](release/RELEASE_NOTES_v0.4.0.md) · **v1.0.0**：[release/RELEASE_NOTES_v1.0.0.md](release/RELEASE_NOTES_v1.0.0.md)（Windows + macOS、接口平台、NapCat）
 > 仓库目录结构与 `scripts/` 命名约定见 **[FOLDER_MAP.md](FOLDER_MAP.md)**。
 >
 > **状态标记**：✅ 仍然有效（按它做就对） · ⚠️ 部分过时（见备注） · 🗄️ 已被取代（保留作背景）
@@ -14,7 +14,7 @@
 | 文档 | 一句话说明 | 状态 |
 | --- | --- | --- |
 | [guides/PROJECT_GUIDE.md](guides/PROJECT_GUIDE.md) | **权威项目说明书**（113 KB / 1450+ 行）：架构、内外核划分、数据流、配置全解、安全机制、调试与改进指南，含 2026-08-20 ~ 2026-09-11 的逐轮更新记录 | ✅ **唯一权威版本**（另一份同名精简版已归档到 legacy，见下） |
-| [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md) | **v0.3.0 从零部署**：版本要求、下载 Release、配置字段、setup-dsh、TOTP、启动、状态检查、真实 QQ 验证清单、更新/备份/回滚、常见错误 | ✅ 部署首选 |
+| [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md) | **从零部署（Windows / macOS）**：版本要求、QQ 后端（SnowLuma / NapCat）准备、配置字段、setup-dsh、TOTP、无窗口启动控制中心 → 开启后端 → 接入桥接、状态检查、真实 QQ 验证清单、更新/备份/回滚、常见错误 | ✅ 部署首选 |
 | [guides/CONTINUITY.md](guides/CONTINUITY.md) | v0.3.0 人际连续性：QQ 号认人、人物库结构、共享策略与可见性、入群事件、跨群协作、迁移、存储可靠性 | ✅ |
 | [guides/ADMIN_CHANNEL.md](guides/ADMIN_CHANNEL.md) | v0.3.0 owner 管理通道：权限分级、DSH rc.2 核实事实、命令、确认流程、TOTP 威胁边界、审批、自动回落、外部变更检测、审计 | ✅ 改动权限相关代码前必读 |
 | [guides/CONFIGURATION.md](guides/CONFIGURATION.md) | v0.3.0 新增配置字段与状态文件 | ✅ |

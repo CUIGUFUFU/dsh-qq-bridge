@@ -17,7 +17,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { pickDialog } from './pick-dialog.mjs';
 
 export const SNOWLUMA_RELEASES_API = 'https://api.github.com/repos/SnowLuma/SnowLuma/releases/latest';
 export const SNOWLUMA_RELEASES_PAGE = 'https://github.com/SnowLuma/SnowLuma/releases';
@@ -165,29 +165,7 @@ export function migrateSnowLumaData({ fromDir, toDir, backupRoot, includeLogs = 
   return { ok: okCount, error: okCount ? undefined : '复制后文件数不一致，请检查（旧目录和备份都还在）', from: from.version, to: to.version, dirs, backupDir, keptInNewDir: moved, check };
 }
 
-/** Windows 原生「选择文件夹」对话框（只在用户点击按钮时调用）。返回所选路径或 null。 */
+/** 系统原生「选择文件夹」窗口（Windows / macOS，只在用户点击按钮时调用）。返回所选路径或 null。实现见 pick-dialog.mjs。 */
 export function pickFolderDialog({ initialDir = '', title = '选择 SnowLuma 的解压目录（含 launcher.bat 的那一层）' } = {}) {
-  return new Promise((resolve) => {
-    if (process.platform !== 'win32') return resolve(null);
-    const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    // 标题与初始目录通过环境变量传入，避免拼进脚本造成注入。
-    const script = [
-      'Add-Type -AssemblyName System.Windows.Forms',
-      '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
-      '$d.Description = $env:QQB_PICK_TITLE',
-      'if ($env:QQB_PICK_INIT -and (Test-Path $env:QQB_PICK_INIT)) { $d.SelectedPath = $env:QQB_PICK_INIT }',
-      '$d.ShowNewFolderButton = $false',
-      '$owner = New-Object System.Windows.Forms.Form -Property @{TopMost = $true}',
-      'if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::OutputEncoding = [Text.Encoding]::UTF8; Write-Output $d.SelectedPath }',
-    ].join('; ');
-    execFile(ps, ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', script], {
-      windowsHide: false,
-      timeout: 10 * 60 * 1000,
-      encoding: 'utf8',
-      env: { ...process.env, QQB_PICK_TITLE: title, QQB_PICK_INIT: initialDir },
-    }, (err, stdout) => {
-      const p = String(stdout ?? '').trim();
-      resolve(!err && p ? p : null);
-    });
-  });
+  return pickDialog({ kind: 'folder', title, initialDir });
 }

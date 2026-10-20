@@ -28,6 +28,9 @@ export function snowLumaHomeCandidates({ cfg = null } = {}) {
   const out = [];
   const push = (p) => { if (p && !out.includes(p)) out.push(p); };
   const sl = cfg?.snowluma ?? cfg ?? {};
+  // 经接口平台（与桥接平行的 interface-platform）连接时，令牌和端点都由平台提供：
+  // 绝不能去 SnowLuma 目录里找令牌，否则自愈会拿到 SnowLuma 的真实端点、绕过平台直连。
+  if (sl.viaPlatform === true) return out;
   if (sl.homeDir) push(String(sl.homeDir));
   if (sl.launcherPath) push(path.dirname(String(sl.launcherPath)));
   if (process.env.SNOWLUMA_HOME) push(process.env.SNOWLUMA_HOME);

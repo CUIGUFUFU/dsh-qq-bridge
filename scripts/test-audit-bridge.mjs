@@ -122,8 +122,9 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
 {
   const image = Buffer.from('89504e470d0a1a0a00000000', 'hex');
   let body;
+  let fetchLimit;
   const h = await bridgeHarness({ globals: {
-    safeFetchBuffer: async () => ({ buffer: image }),
+    safeFetchBuffer: async (_url, maxBytes) => { fetchLimit = maxBytes; return { buffer: image }; },
     validateFetchUrl: async () => { throw new Error('must fetch validated bytes instead of passing a URL'); },
     fetch: async (_url, init) => {
       body = JSON.parse(init.body);
@@ -133,6 +134,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
   try {
     await h.sendStickerV2('group:456', 'fixture-sticker');
     assert.equal(body.message.find((part) => part.type === 'image').data.file, 'base64://' + image.toString('base64'));
+    assert.equal(fetchLimit, 10 * 1024 * 1024, '发送表情按 socialV2.sticker.maxBytes（默认 10MB）限制下载大小');
     console.log('PASS sticker sending gives OneBot validated bytes, never a URL to refetch');
   } catch (error) { failures++; console.error('FAIL safe sticker sending:', error.message); }
   finally { await h.close(); }

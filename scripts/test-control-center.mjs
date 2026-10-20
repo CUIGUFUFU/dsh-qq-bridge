@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { inspectSnowLumaDir, compareVersions, migrateSnowLumaData, checkSnowLumaUpdate, snowlumaLaunchSpec } from '../src/launcher/snowluma-install.mjs';
 import { createManagedProcess } from '../src/launcher/managed-process.mjs';
 import { startControlCenter } from '../src/launcher/control-center.mjs';
+// 不碰真实 NapCat 目录（macOS 上读 QQ 沙盒容器会弹授权窗并卡住测试）
+process.env.QQ_BRIDGE_NAPCAT_HOME ||= path.join(os.tmpdir(), 'qq-bridge-test-no-napcat');
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-cc-'));
@@ -251,7 +253,7 @@ test('L6：AI 可达的代码里没有 SnowLuma 进程控制；控制中心不�
   const code = (p) => read(p).split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
   for (const f of ['src/bridge.js', 'src/mcp-snowluma-safe.js', 'src/mcp-host-server.js', 'src/mcp-web-search-safe.js', 'src/bridge-extensions.js']) {
     const c = code(f);
-    for (const bad of ['launcher.bat', 'snowlumaLaunchSpec', 'launcher/', 'start_snowluma', 'stop_snowluma']) {
+    for (const bad of ['launcher.bat', 'snowlumaLaunchSpec', 'launcher/', 'start_snowluma', 'stop_snowluma', 'napcatLaunchSpec', 'napcat-launch', '--no-sandbox']) {
       assert.ok(!c.includes(bad), `${f} 不得包含「${bad}」（AI 可达路径不得控制 SnowLuma 进程）`);
     }
   }
@@ -261,7 +263,58 @@ test('L6：AI 可达的代码里没有 SnowLuma 进程控制；控制中心不�
   }
   const cc = code('src/launcher/control-center.mjs');
   // 启动 SnowLuma 只能出现在 HTTP 处理（/api/snowluma/start）与固定命令 snowluma start 里。
+  // 第三处是「接入后端开启卡」（/api/backends/snowluma/on，同样只由用户点击触发）
   const starts = cc.split('\n').filter((l) => l.includes('snowluma.start('));
-  assert.equal(starts.length, 2, starts.join('\n'));
+  assert.equal(starts.length, 3, starts.join('\n'));
+  assert.ok(cc.includes('shouldRestart: () => false, // 不自动拉起 NapCat'), 'NapCat 崩溃后不自动重启');
+  const napStarts = cc.split('\n').filter((l) => l.includes('napcat.start('));
+  assert.equal(napStarts.length, 3, `NapCat 只能经 /api/napcat/start、固定命令、开启卡启动：\n${napStarts.join('\n')}`);
   assert.ok(cc.includes("shouldRestart: () => false, // 不自动拉起 SnowLuma"), 'SnowLuma 崩溃后不自动重启');
+});
+
+test('控制中心：「打开桥接控制台」在桥接卡片里（启动与重启之间），令牌只经鉴权的 POST 交给页面', async () => {
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const head = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+  assert.ok(!head.includes('打开桥接控制台'), '顶栏不再放这个按钮');
+  const iStart = html.indexOf('id="bridgeStart"'); const iOpen = html.indexOf('id="consoleOpen"'); const iRestart = html.indexOf('id="bridgeRestart"');
+  assert.ok(iStart > 0 && iStart < iOpen && iOpen < iRestart, '按钮顺序：启动桥接 → 打开桥接控制台 → 重启');
+  assert.ok(html.includes('id="consoleManual"'), '保留手动输入令牌的入口');
+  assert.ok(!/localStorage\.setItem\([^)]*console/i.test(html), '控制中心页面不保存桥接令牌');
+  await withCenter(async ({ port, T }) => {
+    assert.equal((await req(port, 'POST', '/api/bridge/console-link', { body: {} })).status, 401, '没有控制中心令牌拿不到');
+    assert.equal((await req(port, 'GET', '/api/bridge/console-link', { headers: T })).body?.url, undefined, 'GET 不给令牌');
+    const r = await req(port, 'POST', '/api/bridge/console-link', { body: {}, headers: T });
+    assert.equal(r.body.ok, true);
+    assert.equal(r.body.url, 'http://127.0.0.1:3456/?token=fake-console-token-0123456789');
+    assert.equal(r.body.auto, true);
+  }, { config: { consolePort: 3456, consoleToken: 'fake-console-token-0123456789' } });
+  await withCenter(async ({ port, T }) => {
+    const r = await req(port, 'POST', '/api/bridge/console-link', { body: {}, headers: T });
+    assert.equal(r.body.auto, false, '没有令牌时退回手动输入');
+    assert.equal(r.body.url, 'http://127.0.0.1:3100/');
+  }, { config: {} });
+});
+
+test('桥接控制台 401 页：先用本机已存的令牌自动试一次，失败或 ?manual=1 才弹窗', () => {
+  const src = fs.readFileSync(path.join(root, 'src', 'bridge.js'), 'utf8');
+  const line = src.split('\n').find((l) => l.includes('<title>需要令牌</title>'));
+  assert.ok(line, '找到 401 页');
+  assert.match(line, /localStorage\.getItem\(\\'consoleToken\\'\)/);
+  assert.match(line, /consoleTokenTried/, '有防循环标记');
+  assert.match(line, /manual/, '手动入口跳过自动尝试');
+  assert.match(line, /prompt\(/, '仍保留手动输入');
+  const page = fs.readFileSync(path.join(root, 'public', 'console.html'), 'utf8');
+  assert.ok(page.includes("sessionStorage.removeItem('consoleTokenTried')"), '鉴权成功后清掉标记');
+});
+
+test('NapCat 自动登录设置：读 webui.json 的 autoLoginAccount，结果缓存 10 分钟（避免反复触发 macOS「访问其他 App 的数据」）', async () => {
+  const { napcatAutoLoginAccount } = await import('../src/launcher/napcat-launch.mjs');
+  const home = tmp();
+  let reads = 0;
+  const read = () => { reads += 1; return JSON.stringify({ autoLoginAccount: '10001' }); };
+  assert.equal(napcatAutoLoginAccount({ napcatHome: home }, { now: 0, read }), '10001');
+  assert.equal(napcatAutoLoginAccount({ napcatHome: home }, { now: 60_000, read }), '10001');
+  assert.equal(reads, 1, '10 分钟内只读一次');
+  assert.equal(napcatAutoLoginAccount({ napcatHome: home }, { now: 11 * 60_000, read: () => { reads += 1; throw Object.assign(new Error('x'), { code: 'EPERM' }); } }), '', '读不了就当没设置');
+  assert.equal(reads, 2);
 });

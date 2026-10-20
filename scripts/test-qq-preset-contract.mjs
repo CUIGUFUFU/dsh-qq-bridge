@@ -14,7 +14,10 @@ const prefix = persona?.config?.prefix ?? '';
 test('reserved2 YAML resolves to the expected persona and template variables', () => {
   assert.equal(persona?.name, '@deepseek-ai/dsh-persona');
   assert.match(prefix, /\{\{model\}\}/);
-  assert.match(persona.config.suffix, /\{\{cwd\}\}/);
+  // DSH 0.2.1 起提示词变量只剩 provider / model：覆盖 suffix 写 {{cwd}} 会让每一轮直接报错，
+  // 所以不再覆盖 suffix（用当前 DSH 版本自带的默认后缀，0.2.0 与 0.2.1 都兼容）。
+  assert.equal(Object.hasOwn(persona.config, 'suffix'), false, '不覆盖 suffix');
+  assert.ok(!JSON.stringify(persona.config).includes('{{cwd}}'), '不使用 DSH 0.2.1 不认的 {{cwd}}');
   assert.equal(Object.hasOwn(persona.config, 'text'), false);
 });
 

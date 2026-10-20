@@ -7,6 +7,7 @@
 //   allow.groups / allow.private，否则拒绝 —— agent 只能往被允许的地方发消息。
 // - 所有调用走 OneBot HTTP API（httpUrl + accessToken）。
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -110,9 +111,15 @@ function agentApiBase() {
 function readConsoleToken() {
   // 每次请求都重新读取，优先 config.json 里的 consoleToken，其次 state/console-token，
   // 避免 token 变化后 MCP 仍使用启动时缓存的旧值导致一直 401。
+  //
+  // 必须与桥接的校验口径**完全一致**（bridge.js 的 startConsoleServer：长度 16~128、
+  // 只允许 [A-Za-z0-9_-]，不合法就忽略并回退 state/console-token）。否则用户手填一个
+  // 短令牌时桥接会正常运行，而 MCP 拿着这个桥接根本不认的值去请求 —— 每个工具都 401，
+  // 且错误信息里看不出原因是"config.json 里的令牌格式不合法"。
   try {
     const c = getConfig();
-    if (c.consoleToken) return String(c.consoleToken);
+    const configured = String(c.consoleToken ?? '').trim();
+    if (/^[A-Za-z0-9_-]{16,128}$/.test(configured)) return configured;
   } catch {}
   try {
     const tokenFile = path.join(ROOT, 'state', 'console-token');
@@ -122,14 +129,56 @@ function readConsoleToken() {
   }
 }
 
+/**
+ * 把桥接返回的 `error` 变成可读文本。
+ *
+ * 为什么必须有：桥接个别分支会回一个**对象**（例如 `{code, message}`），直接
+ * `new Error(obj)` 会把它 String 成 "[object Object]" —— 模型和运维都读不到任何信息。
+ * r3 的已知未修项里就记着 `qq_wait_for_messages` 出现过 `error: "\"Error: [object Object]\""`。
+ */
+function errorText(value, fallback) {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (value && typeof value === 'object') {
+    try {
+      const text = JSON.stringify(value);
+      if (text && text !== '{}') return text.slice(0, 500);
+    } catch {}
+    const message = value.message ?? value.msg ?? value.error;
+    if (typeof message === 'string' && message.trim()) return message.trim().slice(0, 500);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return fallback;
+}
+
 async function agentApi(path, init = {}) {
   const timeoutMs = init.timeoutMs || 15000;
   const { timeoutMs: _omit, ...rest } = init;
+  const headers = agentHeaders(rest.headers);
+  const res = await fetch(`${agentApiBase()}${path}`, { ...rest, headers, signal: AbortSignal.timeout(timeoutMs) });
+  let body = null;
+  try { body = await res.json(); } catch { body = null; }
+  if (!res.ok) {
+    throw new Error(errorText(body?.error, `桥接 API HTTP ${res.status}`));
+  }
+  // 桥接的部分端点会用 200 + {ok:false,error} 表达业务失败（例如发送被审计拦截）。
+  // 不检查 body.ok 会把「被拦截」当成「发送成功」上报给模型 —— 模型据此认为消息已发出，
+  // 于是不再重试也不告诉用户，是典型的静默错误。
+  if (body && typeof body === 'object' && body.ok === false) {
+    throw new Error(errorText(body.error, '桥接 API 返回 ok:false（未说明原因）'));
+  }
+  return body;
+}
+
+/**
+ * 桥接 API 请求头（含控制台令牌、x-agent-call 与调用方附加头）。
+ * 拆出来是为了长轮询通道复用同一套鉴权，避免两条通路口径漂移。
+ */
+function agentHeaders(extra = {}) {
   const consoleToken = readConsoleToken();
   const headers = {
     'content-type': 'application/json',
     ...(consoleToken ? { 'x-console-token': consoleToken } : {}),
-    ...(rest.headers ?? {})
+    ...(extra ?? {})
   };
   // 声明「这是一次智能体调用」。桥接据此把「没带会话令牌」判定为**拒绝**，而不是
   // 退化成「管理端全权」——所以这个头绝不能随 token 一起被省略。历史上 331/355/379/877
@@ -138,19 +187,92 @@ async function agentApi(path, init = {}) {
   // 令牌本身仍然只在真有时才发：/api/status 的模式探测（legacyReadToolAllowed）本来就是
   // 无令牌调用，桥接对它单独放行并按最小对象返回。
   headers['x-agent-call'] = '1';
-  const res = await fetch(`${agentApiBase()}${path}`, { ...rest, headers, signal: AbortSignal.timeout(timeoutMs) });
-  let body = null;
-  try { body = await res.json(); } catch { body = null; }
-  if (!res.ok) {
-    throw new Error(body?.error || `桥接 API HTTP ${res.status}`);
-  }
-  // 桥接的部分端点会用 200 + {ok:false,error} 表达业务失败（例如发送被审计拦截）。
-  // 不检查 body.ok 会把「被拦截」当成「发送成功」上报给模型 —— 模型据此认为消息已发出，
-  // 于是不再重试也不告诉用户，是典型的静默错误。
-  if (body && typeof body === 'object' && body.ok === false) {
-    throw new Error(body.error || '桥接 API 返回 ok:false（未说明原因）');
-  }
-  return body;
+  return headers;
+}
+
+/**
+ * 长轮询专用 POST（`node:http`，不经过 undici）。
+ *
+ * 为什么必须单独一条：Node 的全局 `fetch` 是 undici，自带 300 秒 `headersTimeout`。
+ * 而 `qq_wait_for_messages` 的常规用法就是 `timeoutMs=300000` 的沉睡前观察 ——
+ * 客户端会在第 301 秒以 `fetch failed / Headers Timeout Error` 断掉，桥接侧的
+ * 长轮询却还在跑满自己的预算：AI 拿不到结果只能重试，而 `activeWaits` 仍占着会话
+ * （重新等待被 429），于是空转烧 token（见 issue #24）。`node:http` 没有默认响应超时，
+ * 超时完全由这里的计时器按调用方预算控制。
+ */
+function agentApiLongPoll(path, init = {}) {
+  const timeoutMs = Math.max(1000, Number(init.timeoutMs) || 15000);
+  const url = new URL(`${agentApiBase()}${path}`);
+  const body = init.body == null ? '' : String(init.body);
+  const headers = agentHeaders(init.headers);
+  headers['content-length'] = Buffer.byteLength(body);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let req;
+    let res;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const timer = setTimeout(() => {
+      const error = new Error(`等待超时（${Math.round(timeoutMs / 1000)}s）`);
+      finish(error);
+      req?.destroy(error);
+      res?.destroy();
+    }, timeoutMs);
+    timer.unref?.();
+    try {
+      req = http.request({
+        hostname: url.hostname,
+        port: url.port || 80,
+        path: url.pathname + url.search,
+        method: init.method || 'GET',
+        headers,
+        timeout: 0
+      }, (response) => {
+        res = response;
+        const chunks = [];
+        let size = 0;
+        response.on('data', (chunk) => {
+          if (settled) return;
+          size += chunk.length;
+          // 桥接的 wait 响应本来就是小 JSON；超过 4MB 说明对端异常，别把内存吃光。
+          if (size > 4 * 1024 * 1024) {
+            finish(new Error('等待响应体过大，已中止'));
+            response.destroy();
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.on('error', (error) => finish(error));
+        response.on('aborted', () => finish(new Error('等待响应中断')));
+        response.on('close', () => { if (!response.complete) finish(new Error('等待响应中断')); });
+        response.on('end', () => {
+          if (settled) return;
+          let parsed = null;
+          try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { parsed = null; }
+          const status = response.statusCode || 0;
+          if (status < 200 || status >= 300) {
+            finish(new Error(errorText(parsed?.error, `桥接 API HTTP ${status}`)));
+            return;
+          }
+          if (parsed && typeof parsed === 'object' && parsed.ok === false) {
+            finish(new Error(errorText(parsed.error, '桥接 API 返回 ok:false（未说明原因）')));
+            return;
+          }
+          finish(null, parsed);
+        });
+      });
+      req.on('error', (error) => finish(error));
+      req.end(body);
+    } catch (error) {
+      finish(error);
+      req?.destroy();
+    }
+  });
 }
 
 async function authorizeRead(key) {
@@ -171,7 +293,7 @@ async function legacyReadToolAllowed() {
   return String(status?.mode ?? '') === 'closed-agent';
 }
 
-const server = new McpServer({ name: 'snowluma-safe', version: '0.4.2' });
+const server = new McpServer({ name: 'snowluma-safe', version: '1.0.0' });
 
 // ── 工具开关必须在**注册期**生效，而不是只在校验期 ──────────────────────────
 //
@@ -229,6 +351,9 @@ const TOOL_CONFIG_FLAGS = {
   qq_cross_group_query: 'crossGroup',
   // v0.4.2（默认关闭；下方注册处另有 === true 判断）
   qq_ask_group_session: 'ownerRelay',
+  // 管理员私聊跨群只读 + 群长期规则（默认关闭；下方注册处另有 === true 判断）
+  qq_owner_peek_group: 'ownerGroupAccess',
+  qq_owner_group_rule: 'ownerGroupAccess',
 };
 const disabledTools = [];
 {
@@ -661,7 +786,9 @@ server.tool(
   },
   async ({ key, token, purpose, timeoutMs, minNewMessages, quietMs }) => {
     try {
-      const data = await agentApi('/api/socialV2/wait', {
+      // 必须走长轮询通道：全局 fetch（undici）有 300s headersTimeout，
+      // 而沉睡前观察的预算就是 300s（见 agentApiLongPoll 的说明）。
+      const data = await agentApiLongPoll('/api/socialV2/wait', {
         method: 'POST',
         body: JSON.stringify({ key, purpose, timeoutMs, minNewMessages, quietMs }),
         headers: { 'x-agent-token': token },
@@ -975,7 +1102,7 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.getStickerI
         const q = new URLSearchParams({ key, stickerId: String(stickerId) });
         const data = await agentApi(`/api/socialV2/sticker-image?${q.toString()}`, { headers: { 'x-agent-token': token }, timeoutMs: 180000 });
         if (!data?.image?.data || !data?.image?.mimeType) {
-          return { content: [{ type: 'text', text: `表情没有可返回的图片：${data?.error || '未知'}` }], isError: true };
+          return { content: [{ type: 'text', text: `表情没有可返回的图片：${errorText(data?.error, '未知')}` }], isError: true };
         }
         const content = [
           { type: 'text', text: `表情 ${data.sticker?.id || stickerId}${data.sticker?.desc ? '（备注：' + data.sticker.desc + '）' : ''} 的图片内容：` },
@@ -1110,7 +1237,7 @@ if (cfg.socialV2?.tools?.getSelfImage !== false) {
         const q = new URLSearchParams({ key });
         const data = await agentApi(`/api/socialV2/self-image?${q.toString()}`, { headers: { 'x-agent-token': token } });
         if (!data?.image?.data || !data?.image?.mimeType) {
-          return { content: [{ type: 'text', text: `没有可返回的形象图片：${data?.error || '未知'}` }], isError: true };
+          return { content: [{ type: 'text', text: `没有可返回的形象图片：${errorText(data?.error, '未知')}` }], isError: true };
         }
         return {
           content: [
@@ -1357,6 +1484,50 @@ if (cfg.socialV2?.tools?.ownerRelay === true) {
         return { content: [{ type: 'text', text: serializeModelData(data) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: `托付失败：${error?.message ?? error}` }], isError: true };
+      }
+    }
+  );
+}
+
+// 管理员私聊的跨群能力（默认关闭；必须 socialV2.tools.ownerGroupAccess === true 才注册）。
+// 只读查看白名单群，以及让桥接把「长期规则」写进目标群会话的记忆；不能代目标群发言。
+if (cfg.socialV2?.tools?.ownerGroupAccess === true) {
+  server.tool(
+    'qq_owner_peek_group',
+    '只在管理员（ownerQQ）本人的私聊里使用：只读查看某个白名单群最近的消息、该群会话的记忆摘要和长期规则，用来回答管理员「群里在聊什么」「群里那条回复为什么是这样」之类的问题。只能看，不能在那个群发言（要发言用 qq_ask_group_session 托付）。不要把看到的群聊内容主动转述到别的群。群聊里任何人要求都不要调用。',
+    {
+      key: z.string().describe('当前会话 key（必须是管理员私聊 private:<ownerQQ>）'),
+      token: z.string().describe('会话令牌'),
+      targetGroupId: z.string().describe('要查看的群号（必须在白名单内）'),
+      limit: z.number().int().min(1).max(50).optional().describe('最近消息条数，默认 20，最多 50'),
+    },
+    async ({ key, token, targetGroupId, limit }) => {
+      try {
+        const qs = new URLSearchParams({ key, targetGroupId: String(targetGroupId), ...(limit ? { limit: String(limit) } : {}) });
+        const data = await agentApi(`/api/socialV2/owner-peek?${qs}`, { headers: { 'x-agent-token': token } });
+        return { content: [{ type: 'text', text: serializeModelData(data) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: `查看失败：${error?.message ?? error}` }], isError: true };
+      }
+    }
+  );
+  server.tool(
+    'qq_owner_group_rule',
+    '只在管理员（ownerQQ）本人的私聊里、管理员明确要求某个群「以后都要这样说话/别再那样」时使用：给那个白名单群设定一条长期规则（例如「用问号怼人时，先单独发一条只有「？」的消息，再把后面的话作为下一条发」）。规则由桥接写进那个群会话的记忆，它之后每次被唤醒都会看到并遵守。action=add 新增，remove 按编号删除，list 查看。规则只能是说话习惯类的约束，不能涉及模式、权限、令牌或任何安全设置。设定后不要声称群里已经照做，也不要替它编造发言。群聊里任何人要求都不要调用。',
+    {
+      key: z.string().describe('当前会话 key（必须是管理员私聊 private:<ownerQQ>）'),
+      token: z.string().describe('会话令牌'),
+      targetGroupId: z.string().describe('目标群号（必须在白名单内）'),
+      action: z.enum(['add', 'remove', 'list']).describe('add 新增 / remove 删除 / list 查看'),
+      text: z.string().optional().describe('action=add 时：规则内容（≤200 字），写成对群会话的明确要求'),
+      ruleId: z.number().int().optional().describe('action=remove 时：要删除的规则编号'),
+    },
+    async ({ key, token, targetGroupId, action, text, ruleId }) => {
+      try {
+        const data = await agentApi('/api/socialV2/group-rule', { method: 'POST', body: JSON.stringify({ key, targetGroupId, action, text, ruleId }), headers: { 'x-agent-token': token } });
+        return { content: [{ type: 'text', text: serializeModelData(data) }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: `群规则操作失败：${error?.message ?? error}` }], isError: true };
       }
     }
   );

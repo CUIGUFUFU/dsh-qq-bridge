@@ -353,4 +353,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   };
 }
 export { resolveDshBaseUrl, dshBaseUrlCandidates, detectDshDesktop } from './lib/dsh-endpoint.mjs';
+export { isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './social/sticker-collect.js';
+export { GROUP_RULE_LIMITS, validateOwnerGroupAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, groupRuleResultText, groupRuleNoticeText } from './social/group-rules.js';
 export { OWNER_RELAY_DEFAULTS, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText } from './social/owner-relay.js';
+export { qqBackendFromVersionInfo, qqBackendLabel } from './lib/qq-backend-label.js';

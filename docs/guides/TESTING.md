@@ -3,7 +3,7 @@
 ## 离线回归（不需要 QQ、SnowLuma、DSH 或网络）
 
 ```powershell
-npm run test:audit      # 41 个脚本：原版 31 个 + v0.3.0 新增 5 个 + v0.4.0 新增 1 个 + v0.4.1 新增 3 个 + v0.4.2 新增 1 个
+npm run test:audit      # 53 个脚本（v1.0.0）：原版与各版本新增的离线回归，清单见 scripts/test-audit.mjs；macOS 上 test-console-encoding 是已知失败（只适用于 Windows）
 npm run test:v030       # 只跑 v0.3.0 的四个新测试
 ```
 
@@ -18,6 +18,10 @@ npm run test:v030       # 只跑 v0.3.0 的四个新测试
 | `scripts/test-agent-errors.mjs` | v0.4.1：DSH 回合错误的错误码识别与分类；日志详情抹掉凭据、令牌、本机路径；群聊只显示错误码 |
 | `scripts/test-dsh-endpoint.mjs` | v0.4.1：DSH 地址自动识别（显式配置照用、桌面版优先 19387、命令行版 3080、端口探测） |
 | `scripts/test-owner-relay.mjs` | v0.4.2：管理员私聊托付群会话——只有 owner 私聊能托付、目标必须是白名单群、开关默认关闭、限频、待办只看不取直到最终投递、提示词不让原样转发；端点只唤醒目标群会话、不直接发送 |
+| `scripts/test-platform.mjs` | 接口平台 M1（仓库内 `interface-platform/`，缺失即失败）：平台自身单元/端到端测试（假 SnowLuma + 真实 `@snowluma/sdk` 客户端走兼容入口、发送状态 confirmed/failed/unknown 与去重、SSE 游标、多账号路由、停用桥接、断开/重连、令牌分离、Host 校验）；控制中心托管平台进程与「接入桥接」备份/还原；`viaPlatform` 时自愈不绕过平台；顶部大标签切换不发请求；控制中心只经 HTTP 管理接口与平台通信 |
+| `scripts/test-napcat-manage.mjs` | NapCat 管理：系统「浏览…」窗口（macOS osascript / Windows PowerShell，参数不拼进脚本）、NapCat 版本（后端自报 / Windows 安装文件）、检查更新只读 Release 不下载、设置校验与经控制中心接口保存、页面元素 |
+| `scripts/test-qq-backend-label.mjs` | 桥接日志里 QQ 后端的称呼：经接口平台写「QQ 后端（经接口平台 · NapCat 版本）」，直连 SnowLuma 仍写 SnowLuma |
+| `scripts/test-mac-app.mjs` | macOS 无窗口启动 App 的脚本约定（后台启动、reopen、控制中心退出后 App 退出、不碰 SnowLuma/QQ）；macOS 上实际生成并校验签名 |
 | `scripts/test-agent-preset-patches.mjs` | preset 源与 bundle patch 不漂移（含新 preset） |
 
 原版测试在本仓库里做过的调整（都是让测试不依赖开发机环境，没有放宽断言）：

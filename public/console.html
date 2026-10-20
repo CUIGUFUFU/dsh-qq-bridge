@@ -2106,6 +2106,7 @@ button:active:not(:disabled) {
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="personProfile"> <span><b>qq_get_person / qq_note_person</b><span class="meta">按 QQ 号查看/记录人物档案（按共享策略过滤可见范围）</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="requestMode"> <span><b>qq_request_mode_change</b><span class="meta">只在管理员私聊里登记模式切换申请；不能执行、不能确认</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="crossGroup"> <span><b>qq_cross_group_query</b><span class="meta">跨群受控查询（还需 crossGroup.enabled 与链接授权）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="ownerGroupAccess"> <span><b>qq_owner_peek_group / qq_owner_group_rule</b><span class="meta">管理员私聊里只读查看白名单群的消息和记忆，并给群设定长期规则（由桥接写进群会话记忆、每次唤醒注入；默认关闭，改动后需重启 DSH）</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="ownerRelay"> <span><b>qq_ask_group_session</b><span class="meta">管理员私聊里托付某个白名单群的会话去群里说话（默认关闭；由群会话自己组织语言发言，改动后需重启 DSH）</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getSelfImage"> <span><b>qq_get_self_image</b><span class="meta">查看自己的默认 Q 版形象图片</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="stickerNote"> <span><b>qq_sticker_note</b><span class="meta">给表情记录本地含义/标签/用法</span></span></label>
@@ -2317,6 +2318,28 @@ button:active:not(:disabled) {
       <div id="v2WakeStatusOutput" class="tool-log-table">（空）</div>
 
 </div></details>
+<details class="settings-group"><summary>初始提示词（预写某个群/私聊的环境，只在 AI 首次唤醒时看一次）</summary><div class="settings-content">
+      <div class="meta" style="margin-bottom:8px">
+        在这里提前告诉 AI「这个群是什么圈子、什么氛围、聊什么、有什么忌讳」。AI 只在<b>该会话的第一次唤醒</b>时收到一次，
+        之后不会重复注入（那时它已经在会话上下文里了）；AI 读不到也改不了这份设置。
+        如果 AI 已经在这个会话里首次唤醒过，需要重置该会话（「会话映射」里重置，或「重置二代状态」）后，下一次首次唤醒才会带上它。
+        留空保存等于删除；只写环境背景，别写指令式的要求（那是人格卡/仿真提示词的事）。
+      </div>
+      <div class="row">
+        <input type="text" id="v2InitPromptKey" placeholder="group:123456789（可从「白名单会话快速选择」带过来）" style="flex:1" aria-label="初始提示词的会话 key">
+        <button id="v2InitPromptLoad" class="small">加载</button>
+        <button id="v2InitPromptSave" class="small">保存</button>
+        <button id="v2InitPromptClear" class="small danger">删除</button>
+        <span class="meta" id="v2InitPromptMsg"></span>
+      </div>
+      <textarea id="v2InitPromptText" rows="5" aria-label="初始提示词正文" placeholder="例如：这是一个偏技术的闲聊群，群友喜欢玩梗、聊模型和本地部署；氛围轻松，别长篇大论，遇到配置问题直接给结论。"></textarea>
+      <div class="meta">
+        当前 <span id="v2InitPromptCount">0</span> / <span id="v2InitPromptMax">2000</span> 字符（上限可在 config.json 的
+        <code>socialV2.initialPromptMaxChars</code> 调整）。
+      </div>
+      <div id="v2InitPromptList" class="tool-log-table">（点「加载」且 key 留空时，列出所有已设置的会话）</div>
+
+</div></details>
 <details class="settings-group"><summary>白名单会话快速选择</summary><div class="settings-content">
       <div class="row">
         <select id="v2SessionSelect" style="flex:1"><option value="">选择白名单群/私聊…</option></select>
@@ -2346,7 +2369,8 @@ button:active:not(:disabled) {
       <div class="meta">DSH 会从群聊中自动提取疑似黑话候选；二代仿真模式下 AI 也可用 <code>qq_slang_submit</code> 主动提交陌生词。候选可批量送 DSH 深度联网研究，研究结果回到控制台由你删改修正后转正；确认后的词条会写入“黑话提示词”，注入一代/二代 AI 的聊天上下文，成为 AI 可查询和使用的记忆。</div>
 
       <div class="slang-tabs">
-        <button class="slang-tab active" data-slang-tab="candidate">候选词</button>
+        <button class="slang-tab active" data-slang-tab="candidate" title="还没有含义 / 用法 / 示例的候选">候选词-待研究 <span class="meta" id="slangCountPending"></span></button>
+        <button class="slang-tab" data-slang-tab="researched" title="已有含义 / 用法 / 示例（研究结果或手填），等你确认或拒绝">候选词-已研究 <span class="meta" id="slangCountResearched"></span></button>
         <button class="slang-tab" data-slang-tab="confirmed">已确认</button>
         <button class="slang-tab" data-slang-tab="rejected">已拒绝</button>
       </div>
@@ -2682,6 +2706,7 @@ button:active:not(:disabled) {
   // 如果通过 ?token= 进入（控制台启用鉴权时根路径会重定向带 token），存到 localStorage
   const qs = new URLSearchParams(location.search);
   const token = qs.get('token');
+  try { sessionStorage.removeItem('consoleTokenTried'); } catch {} // 页面已通过鉴权：清掉 401 页的自动重试标记
   if (token) {
     localStorage.setItem('consoleToken', token);
     history.replaceState({}, '', location.pathname + location.hash);
@@ -3830,6 +3855,98 @@ function loadV2WakeStatus() {
 }
 document.getElementById('v2WakeStatusLoad').addEventListener('click', loadV2WakeStatus);
 
+// ── 初始提示词（每个会话一份，只在 AI 首次唤醒时注入一次） ────────────────────
+const v2InitPromptTextEl = document.getElementById('v2InitPromptText');
+function v2InitPromptKeyValue() { return document.getElementById('v2InitPromptKey').value.trim(); }
+function setV2InitPromptMsg(text, kind) {
+  const msg = document.getElementById('v2InitPromptMsg');
+  msg.textContent = text;
+  msg.className = 'meta' + (kind ? ' ' + kind : '');
+}
+function updateV2InitPromptCount() {
+  document.getElementById('v2InitPromptCount').textContent = String(v2InitPromptTextEl.value.length);
+}
+function applyV2InitPromptMax(maxChars) {
+  const max = Math.round(Number(maxChars));
+  if (!Number.isFinite(max) || max <= 0) return;
+  document.getElementById('v2InitPromptMax').textContent = String(max);
+  v2InitPromptTextEl.maxLength = max;
+}
+function renderV2InitPromptEntries(entries) {
+  const box = document.getElementById('v2InitPromptList');
+  if (!Array.isArray(entries) || !entries.length) { box.textContent = '（还没有任何会话设置初始提示词）'; return; }
+  box.innerHTML = entries.map((e) => {
+    const when = Number(e.updatedAt) > 0 ? new Date(Number(e.updatedAt)).toLocaleString() : '未知时间';
+    return `<div style="margin:3px 0"><code>${esc(e.key)}</code> · ${Number(e.chars) || 0} 字符 · ${esc(when)} <button class="small" data-init-prompt-key="${esc(e.key)}">编辑</button></div>`;
+  }).join('');
+}
+async function loadV2InitialPrompt() {
+  const key = v2InitPromptKeyValue();
+  setV2InitPromptMsg('加载中…');
+  try {
+    const r = await api('/api/socialV2/initial-prompt' + (key ? '?key=' + encodeURIComponent(key) : ''));
+    if (!r.ok) { setV2InitPromptMsg('❌ ' + (r.error || '失败'), 'err'); return; }
+    applyV2InitPromptMax(r.maxChars);
+    const readOnly = r.writable === false;
+    if (!key) {
+      renderV2InitPromptEntries(r.entries);
+      setV2InitPromptMsg(readOnly ? '⚠️ 文件不可写（只读降级），只显示已有内容' : `✅ 共 ${(r.entries || []).length} 条`, readOnly ? 'err' : 'ok');
+      return;
+    }
+    v2InitPromptTextEl.value = r.text || '';
+    updateV2InitPromptCount();
+    document.getElementById('v2InitPromptList').textContent = r.exists
+      ? '该会话已设置初始提示词；再点「保存」会覆盖。'
+      : '该会话还没有设置初始提示词；填写后点「保存」新建。';
+    if (readOnly) setV2InitPromptMsg('⚠️ 文件不可写（只读降级）：能看不能存', 'err');
+    else setV2InitPromptMsg(r.exists ? '✅ 已加载' : '（空）', r.exists ? 'ok' : '');
+  } catch (e) {
+    setV2InitPromptMsg('❌ ' + (e.message || e), 'err');
+  }
+}
+async function saveV2InitialPrompt() {
+  const key = v2InitPromptKeyValue();
+  if (!key) { setV2InitPromptMsg('请输入会话 key（group:群号 或 private:QQ号）', 'err'); return; }
+  setV2InitPromptMsg('保存中…');
+  try {
+    const r = await api('/api/socialV2/initial-prompt', 'POST', { key, text: v2InitPromptTextEl.value });
+    if (!r.ok) { setV2InitPromptMsg('❌ ' + (r.error || '失败'), 'err'); return; }
+    applyV2InitPromptMax(r.maxChars);
+    if (r.deleted) {
+      v2InitPromptTextEl.value = '';
+      updateV2InitPromptCount();
+      setV2InitPromptMsg('✅ 内容为空，已删除该会话的初始提示词', 'ok');
+    } else {
+      setV2InitPromptMsg(`✅ 已保存（${r.chars} 字符），该会话下一次首次唤醒时注入`, 'ok');
+    }
+  } catch (e) {
+    setV2InitPromptMsg('❌ ' + (e.message || e), 'err');
+  }
+}
+document.getElementById('v2InitPromptLoad').addEventListener('click', loadV2InitialPrompt);
+document.getElementById('v2InitPromptSave').addEventListener('click', saveV2InitialPrompt);
+document.getElementById('v2InitPromptClear').addEventListener('click', async () => {
+  const key = v2InitPromptKeyValue();
+  if (!key) { setV2InitPromptMsg('请输入会话 key', 'err'); return; }
+  if (!confirm(`确定删除 ${key} 的初始提示词？`)) return;
+  try {
+    const r = await api('/api/socialV2/initial-prompt', 'POST', { key, delete: true });
+    if (!r.ok) { setV2InitPromptMsg('❌ ' + (r.error || '失败'), 'err'); return; }
+    v2InitPromptTextEl.value = '';
+    updateV2InitPromptCount();
+    setV2InitPromptMsg('✅ 已删除', 'ok');
+  } catch (e) {
+    setV2InitPromptMsg('❌ ' + (e.message || e), 'err');
+  }
+});
+v2InitPromptTextEl.addEventListener('input', updateV2InitPromptCount);
+document.getElementById('v2InitPromptList').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button[data-init-prompt-key]');
+  if (!btn) return;
+  document.getElementById('v2InitPromptKey').value = btn.dataset.initPromptKey || '';
+  loadV2InitialPrompt();
+});
+
 async function loadV2SessionOptions() {
   const sel = document.getElementById('v2SessionSelect');
   const prev = sel.value;
@@ -3853,6 +3970,7 @@ document.getElementById('v2SessionSelect').addEventListener('change', (ev) => {
   document.getElementById('v2StateKey').value = key;
   document.getElementById('v2MemoryKey').value = key;
   document.getElementById('v2WakeKey').value = key;
+  document.getElementById('v2InitPromptKey').value = key;
 });
 
 document.getElementById('v2ConfigSave').addEventListener('click', saveV2Config);
@@ -4043,6 +4161,18 @@ let slangActiveTab = 'candidate';
 let slangModalId = null;
 let slangModalMode = 'confirm'; // confirm | edit
 
+// 「候选词-待研究 / 已研究」只是页面上的分栏：数据里都还是 status=candidate（确认、拒绝、研究接口都不变）。
+// 有含义、用法或示例之一就算已研究（DSH 研究结果或手填都算）。
+function slangIsResearched(e) {
+  return !!(String(e?.meaning ?? '').trim() || String(e?.usage ?? '').trim() || String(e?.example ?? '').trim());
+}
+function slangTabStatus(tab) { return tab === 'researched' ? 'candidate' : tab; }
+function slangInTab(e, tab) {
+  if (e.status !== slangTabStatus(tab)) return false;
+  if (tab === 'candidate') return !slangIsResearched(e);
+  if (tab === 'researched') return slangIsResearched(e);
+  return true;
+}
 function slangStatusLabel(status) {
   return { candidate: '候选', confirmed: '已确认', rejected: '已拒绝' }[status] || esc(status);
 }
@@ -4068,15 +4198,15 @@ function slangSearchFields(e) {
   return [e.content, e.meaning, e.usage, e.example, e.risk, Array.isArray(e.sources) ? e.sources.join(' ') : '', Array.isArray(e.evidence) ? e.evidence.map((x) => x.text || '').join(' ') : ''].join(' ').toLowerCase();
 }
 function getSlangLimit() {
-  const id = slangActiveTab === 'candidate' ? 'slangLimitCand' : slangActiveTab === 'confirmed' ? 'slangLimitConfirmed' : 'slangLimitRejected';
+  const id = slangTabStatus(slangActiveTab) === 'candidate' ? 'slangLimitCand' : slangActiveTab === 'confirmed' ? 'slangLimitConfirmed' : 'slangLimitRejected';
   return Math.max(10, Number(document.getElementById(id)?.value) || 100);
 }
 function getSlangSearch() {
-  const id = slangActiveTab === 'candidate' ? 'slangSearchCand' : slangActiveTab === 'confirmed' ? 'slangSearchConfirmed' : 'slangSearchRejected';
+  const id = slangTabStatus(slangActiveTab) === 'candidate' ? 'slangSearchCand' : slangActiveTab === 'confirmed' ? 'slangSearchConfirmed' : 'slangSearchRejected';
   return String(document.getElementById(id)?.value || '').trim().toLowerCase();
 }
 function selectedIdsForStatus(status) {
-  return [...slangSelected].filter((id) => slangEntriesCache.some((e) => e.id === id && e.status === status));
+  return [...slangSelected].filter((id) => slangEntriesCache.some((e) => e.id === id && e.status === status && (status !== 'candidate' || slangInTab(e, slangActiveTab))));
 }
 function setSlangMsg(text, ok = true) {
   const msg = document.getElementById('slangMsg');
@@ -4086,15 +4216,21 @@ function setSlangMsg(text, ok = true) {
 }
 function setSlangTab(tab) {
   slangActiveTab = tab;
+  // 两个候选分栏共用一套批量按钮：切换时丢掉另一栏里看不见的勾选，批量操作只作用于当前栏
+  for (const id of [...slangSelected]) {
+    const e = slangEntriesCache.find((x) => x.id === id);
+    if (e && e.status === 'candidate' && !slangInTab(e, tab)) slangSelected.delete(id);
+  }
+  const panelKey = slangTabStatus(tab);
   document.querySelectorAll('.slang-tab').forEach((btn) => btn.classList.toggle('active', btn.dataset.slangTab === tab));
-  document.querySelectorAll('.slang-panel').forEach((panel) => panel.classList.toggle('active', panel.id === 'slangPanel' + tab[0].toUpperCase() + tab.slice(1)));
+  document.querySelectorAll('.slang-panel').forEach((panel) => panel.classList.toggle('active', panel.id === 'slangPanel' + panelKey[0].toUpperCase() + panelKey.slice(1)));
   renderSlangPanel();
 }
 function updateSlangSelectAll(status) {
   const id = status === 'candidate' ? 'slangCandidateSelectAll' : status === 'confirmed' ? 'slangConfirmedSelectAll' : 'slangRejectedSelectAll';
   const el = document.getElementById(id);
   if (!el) return;
-  const list = slangEntriesCache.filter((e) => e.status === status);
+  const list = slangEntriesCache.filter((e) => slangInTab(e, slangActiveTab));
   const q = getSlangSearch();
   const filtered = q ? list.filter((e) => slangSearchFields(e).includes(q)) : list;
   el.checked = filtered.length > 0 && filtered.every((e) => slangSelected.has(e.id));
@@ -4102,15 +4238,20 @@ function updateSlangSelectAll(status) {
 }
 
 function renderSlangPanel() {
-  const status = slangActiveTab;
+  const tab = slangActiveTab;
+  const status = slangTabStatus(tab);
+  const pendingN = slangEntriesCache.filter((e) => slangInTab(e, 'candidate')).length;
+  const researchedN = slangEntriesCache.filter((e) => slangInTab(e, 'researched')).length;
+  const cp = document.getElementById('slangCountPending'); if (cp) cp.textContent = pendingN ? `(${pendingN})` : '';
+  const cr = document.getElementById('slangCountResearched'); if (cr) cr.textContent = researchedN ? `(${researchedN})` : '';
   const containerId = status === 'candidate' ? 'slangCandidateList' : status === 'confirmed' ? 'slangConfirmedList' : 'slangRejectedList';
   const box = document.getElementById(containerId);
   if (!box) return;
-  const list = slangEntriesCache.filter((e) => e.status === status);
+  const list = slangEntriesCache.filter((e) => slangInTab(e, tab));
   const q = getSlangSearch();
   const filtered = q ? list.filter((e) => slangSearchFields(e).includes(q)) : list;
   if (!filtered.length) {
-    box.innerHTML = '<div class="meta" style="padding:8px">' + (list.length ? '没有符合条件的词条' : (status === 'candidate' ? '暂无候选黑话，等 DSH 自动提取、AI 提交或手动添加' : status === 'confirmed' ? '暂无已确认黑话' : '暂无已拒绝词条')) + '</div>';
+    box.innerHTML = '<div class="meta" style="padding:8px">' + (list.length ? '没有符合条件的词条' : (tab === 'researched' ? '暂无已研究的候选：送 DSH 深度研究、或在「编辑」里填写含义后会出现在这里' : status === 'candidate' ? '暂无待研究的候选，等 DSH 自动提取、AI 提交或手动添加' : status === 'confirmed' ? '暂无已确认黑话' : '暂无已拒绝词条')) + '</div>';
     updateSlangSelectAll(status);
     return;
   }
@@ -4227,7 +4368,7 @@ document.getElementById('slangLimitCand').addEventListener('change', renderSlang
 document.getElementById('slangLimitConfirmed').addEventListener('change', renderSlangPanel);
 document.getElementById('slangLimitRejected').addEventListener('change', renderSlangPanel);
 document.getElementById('slangCandidateSelectAll').addEventListener('change', (e) => {
-  const list = slangEntriesCache.filter((x) => x.status === 'candidate');
+  const list = slangEntriesCache.filter((x) => slangInTab(x, slangActiveTab));
   const q = getSlangSearch();
   const filtered = q ? list.filter((x) => slangSearchFields(x).includes(q)) : list;
   for (const x of filtered) { if (e.target.checked) slangSelected.add(x.id); else slangSelected.delete(x.id); }

@@ -12,7 +12,8 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    suffix: Your working directory is {{cwd}}.
+    # 不再覆盖 suffix：DSH 0.2.1 起提示词变量只剩 provider / model，cwd 变量会让每一轮直接报错
+    # （unknown prompt variable "cwd" in section "deployment:persona-suffix"）。省略后用当前 DSH 版本自带的默认后缀，0.2.0 与 0.2.1 都兼容。
     prefix: >-
       You are a coding agent powered by the {{model}} model.
 

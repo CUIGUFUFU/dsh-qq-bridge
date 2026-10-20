@@ -401,12 +401,16 @@ function autoInstallProfileBundles() {
   // v0.4.1：PATH 里没有 dsh 时（DSH 桌面版的常见情况），改用桌面版自带的 CLI（版本与桌面版一致）。
   const desktopCli = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'DeepSeek Harness', 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd');
   const onPath = (name) => String(process.env.PATH ?? '').split(path.delimiter).some((d) => d && fs.existsSync(path.join(d, name)));
-  const cliPath = windows ? (onPath('dsh.cmd') ? 'dsh.cmd' : (fs.existsSync(desktopCli) ? desktopCli : 'dsh.cmd')) : 'dsh';
-  if (windows && cliPath === desktopCli) log(`PATH 里没有 dsh，使用 DSH 桌面版自带的 CLI：${desktopCli}`);
+  // macOS 桌面版的 CLI 在 App 包里（实测 0.2.0-rc.2：Contents/Resources/runtime/cli/bin/dsh），默认不在 PATH 里。
+  const macDesktopCli = path.join(process.env.DSH_DESKTOP_APP || '/Applications/DeepSeek Harness.app', 'Contents', 'Resources', 'runtime', 'cli', 'bin', 'dsh');
+  const cliPath = windows
+    ? (onPath('dsh.cmd') ? 'dsh.cmd' : (fs.existsSync(desktopCli) ? desktopCli : 'dsh.cmd'))
+    : (onPath('dsh') ? 'dsh' : (process.platform === 'darwin' && fs.existsSync(macDesktopCli) ? macDesktopCli : 'dsh'));
+  if (cliPath === desktopCli || cliPath === macDesktopCli) log(`PATH 里没有 dsh，使用 DSH 桌面版自带的 CLI：${cliPath}`);
   // Node cannot spawn npm's .cmd shim directly. Keep the shell command constant;
   // the validated (no quotes/control chars) profile travels through one quoted
   // environment expansion, with delayed expansion disabled to preserve '!'.
-  const cmd = windows ? (process.env.ComSpec || 'cmd.exe') : 'dsh';
+  const cmd = windows ? (process.env.ComSpec || 'cmd.exe') : cliPath;
   const args = windows
     ? ['/d', '/v:off', '/s', '/c', '""%QQ_BRIDGE_DSH_CLI%" plugin --profile "%QQ_BRIDGE_SETUP_PROFILE%" install"']
     : ['plugin', '--profile', PROFILE, 'install'];

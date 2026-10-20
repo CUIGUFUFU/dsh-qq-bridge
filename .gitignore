@@ -3,7 +3,9 @@ node_modules/
 .npm-cache/
 
 # Runtime state and local config (never publish)
+# state/ 匹配任意层级：桥接的 state/ 与接口平台的 interface-platform/state/（令牌、实例配置）都不入库
 state/
+interface-platform/state/
 config.json
 *.log
 *.bak
@@ -80,3 +82,9 @@ audio/
 /snowluma/
 /SnowLuma*/
 /SnowLuma*.zip
+
+# macOS Finder 元数据
+.DS_Store
+
+# macOS 本机生成的启动 App（npm run mac-app；含系统自带的 applet，不入库、不发布）
+/*.app/

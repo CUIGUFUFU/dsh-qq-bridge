@@ -12,14 +12,17 @@
 
 ---
 
-## 🆕 增强版 v0.4.0（qq-bridge-enhanced）
+## 🆕 增强版（qq-bridge-enhanced）
 
-> 本仓库是 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 的二次开发版本（来源与授权见 [NOTICE.md](NOTICE.md)）。
+> 本仓库是 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 的二次开发版本（来源与授权见 [NOTICE.md](NOTICE.md)），已合并上游 r4 的修复。
 > 原版的全部功能（消息桥接、多群白名单、reserved2 二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查）保持不变；
-> 下文「QQ ↔ DeepSeek Harness 桥接」之后的内容是上游原文档，仍然适用。
+> 下文「QQ ↔ DeepSeek Harness 桥接」之后的内容是上游原文档，仍然适用（部署请以本节和 [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) 为准）。
 
 | 新功能 | 一句话 | 文档 |
 | --- | --- | --- |
+| **Windows + macOS** | Windows 用 SnowLuma 或 NapCat，macOS 用 NapCat；两边都有无窗口启动入口 | [DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) |
+| **接口平台** | 仓库里的 `interface-platform/`：桥接和 QQ 后端之间的统一接入层，按后端目录自动发现账号，可同时接 SnowLuma 与 NapCat；为以后接微信 / Discord / KOOK 留好接口 | [interface-platform/README.md](interface-platform/README.md) |
+| **控制中心** | 一个本地网页管理桥接、接口平台和 QQ 后端：按钮启停（QQ 后端只由你点击启动）、版本与更新检查、NapCat 扫码二维码直接显示、整体状态栏 | [CONTROL_CENTER.md](docs/guides/CONTROL_CENTER.md) |
 | 跨群认人 | 只认 QQ 号：同一个人在不同群换了群名片也能认出来；同名不同号绝不合并 | [CONTINUITY.md](docs/guides/CONTINUITY.md) |
 | 分层人物记忆 | 群内 / 私聊 / 全局；默认只跨群共享「是同一个人」，可见范围在注入时由程序过滤 | 同上 |
 | 入群感知 | 新人、熟人进新群、退群回归分别识别并唤醒 AI；首次部署不把老成员当新人 | 同上 |
@@ -28,32 +31,47 @@
 | 权限分级 | L0 群友 / L1 只读 Agent / L2 工作区读写 / L3 完全访问但每次审批；不存在免审批模式 | 同上 |
 | 审批增强 | 编号 `#n`、展示真实命令参数、并发不覆盖、超时自动拒绝 | 同上 |
 | 自动回落与审计 | 高权限闲置 30 分钟回落；每次变更私聊通知；哈希链审计日志 | 同上 |
-| **控制中心（v0.4.0）** | 一个本地网页同时管理桥接与 SnowLuma：两个终端合并显示、按钮启停（SnowLuma 只由你点击启动）、版本检查与更新数据迁移、整体状态栏 | [CONTROL_CENTER.md](docs/guides/CONTROL_CENTER.md) |
+| DSH 0.2.1 | 兼容 0.2.0-rc.2 与 0.2.1；0.2.1 桌面版的随机端口自动识别、DSH 重启后自动跟上 | [DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) |
 
-### 增强版快速开始（Windows）
+### 部署（无窗口版）
 
-```powershell
-npm install -g @deepseek-ai/dsh@0.2.0-rc.2   # DSH 锁定版本；之后在另一个窗口运行：dsh web
-npm ci
-npm run test:audit                            # 离线回归，应为 41/41
-Copy-Item config.example.json config.json     # 编辑 ownerQQ / allow / snowluma.*（见 docs/guides/CONFIGURATION.md）
-node scripts/setup-dsh.mjs                    # 装 preset、MCP、权限预设，然后重启 DSH
-npm run probe:permission                      # 部署后实测 DSH 权限行为（需 DSH 运行）
-npm run admin:totp-setup                      # 可选：L3 的 TOTP 二次认证
-.\control-center.bat                          # 日常启动：打开控制中心网页（无窗口版：control-center-hidden.vbs）
-```
+需要：Node.js ≥ 22.13、DSH 桌面版或命令行版（0.2.0-rc.2 / 0.2.1，先在 DSH 里配好模型账号）、你自己安装并能登录的 QQ 后端
+（**Windows**：SnowLuma 完整版或 NapCat.Shell；**macOS**：Mac 版 QQ + [NapCat Mac 安装器](https://github.com/NapNeko/NapCat-Mac-Installer/releases)，
+并在 NapCat 的 WebUI 里开启 WebSocket 服务端 `127.0.0.1:3001`）。本项目不下载、不安装 QQ 后端。
 
-日常启动推荐用**控制中心**：一个本地网页（`http://127.0.0.1:3099/`）左侧是桥接终端与命令、右侧是 SnowLuma，
-底部是整体状态。打开控制中心不会自动启动任何东西，桥接和 SnowLuma 都由你点按钮启动。说明见 [docs/guides/CONTROL_CENTER.md](docs/guides/CONTROL_CENTER.md)。
-原来的 `start.bat` 仍然可用，但不要和控制中心同时启动桥接。
+**第一次安装**（在项目目录的终端里，只做一次）：
 
-SnowLuma 需要你自己下载、启动并登录 QQ（本项目不分发、不启动它）。完整的、可交给 DSH agent 执行的部署说明：
-**[docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md)**。配置字段：[docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md)。
-测试：[docs/guides/TESTING.md](docs/guides/TESTING.md)。变更：[CHANGELOG.md](CHANGELOG.md)。发布：[docs/release/PUBLISHING.md](docs/release/PUBLISHING.md)。
+| 步骤 | Windows（PowerShell） | macOS（终端） |
+| --- | --- | --- |
+| 装依赖 | `npm ci` | `npm ci` |
+| 写配置 | `Copy-Item config.example.json config.json` | `cp config.example.json config.json` |
+| 改配置 | 填 `ownerQQ`、`allow.groups` / `allow.private`、`dsh.provider`（[字段说明](docs/guides/CONFIGURATION.md)） | 同左 |
+| 装到 DSH | `node scripts\setup-dsh.mjs`，然后**重启 DSH** | `node scripts/setup-dsh.mjs`，然后**重启 DSH** |
+| 无窗口入口 | 已自带 `control-center-hidden.vbs` | `npm run mac-app` → 生成「QQ Bridge 控制中心.app」 |
+
+`snowluma.*`（连接 QQ 后端的地址、令牌）不用手填，下面「接入桥接」会自动写好。可选：`npm run test:audit` 离线自检、`npm run admin:totp-setup`（L3 的 TOTP）。
+
+**第一次启动**：
+
+1. 双击无窗口入口（Windows：`control-center-hidden.vbs`；macOS：「QQ Bridge 控制中心.app」），浏览器打开控制中心。
+   macOS 第一次会问「“QQ Bridge 控制中心”想访问其他 App 的数据」——点**允许**（要读 QQ 容器里的 NapCat 配置，只问一次）。
+2. **接口平台 → 概览**，在后端卡片上点「开启」：
+   - Windows · SnowLuma：先在「接入实例 → 本机 SnowLuma 程序」里「浏览…」选中 SnowLuma 目录，再点「开启 SnowLuma」，第一次在它的 WebUI 里扫码；
+   - NapCat：点「开启 NapCat」（Windows 先在「管理 NapCat 程序 → NapCat 设置」里选启动文件）；要扫码时卡片上直接显示二维码。
+3. **接口平台 → 设置**，点「接入桥接」。
+4. **桥接** 标签点「启动桥接」。底部状态栏全绿（接口平台「1 账号就绪 · 桥接已接入」、QQ「在线 <机器人>」、DSH「已就绪」）即完成。
+
+**日常**：双击无窗口入口 → 开启后端 → 启动桥接；退出用页面右上角「退出控制中心」（会一起停掉桥接、接口平台和它启动的 QQ 后端）。
+更新项目或挪了目录后，macOS 重新运行一次 `npm run mac-app`。不要同时用 `start.bat` / `npm start` 和控制中心启动桥接。
+
+给 DSH agent 执行的逐步部署说明（含检查命令、预期输出、常见错误、更新 / 备份 / 回滚）：**[docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md)**。
+配置字段：[docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md)。测试：[docs/guides/TESTING.md](docs/guides/TESTING.md)。
+变更：[CHANGELOG.md](CHANGELOG.md)。发布：[docs/release/PUBLISHING.md](docs/release/PUBLISHING.md)。
 
 > ⚠️ 与上游的行为差异：控制台/DSH 设置/QQ 的模式变更都会通知 owner；未经管理通道授权的 closed-agent 不能建会话
 >（从上游升级时若停在 closed-agent，会回落到 reserved2 并告警）；审批改为编号制。详见 CHANGELOG「变更」。
-> 下文上游文档中 `git clone https://github.com/Derpyu520/qq-bridge.git` 的地方，请换成你的增强版仓库地址或使用 Release ZIP。
+> 下文上游文档中 `git clone https://github.com/Derpyu520/qq-bridge.git` 的地方，请换成本仓库地址（https://github.com/hxxhurundong/dsh-qq）或使用 Release ZIP；
+> 上游文档按「桥接直连 SnowLuma、DSH 固定端口 3080」写，那条路仍然可用，但推荐用上面的控制中心 + 接口平台。
 
 ---
 

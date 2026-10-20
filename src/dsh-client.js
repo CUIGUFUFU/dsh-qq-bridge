@@ -326,6 +326,18 @@ export class NodeApiClient extends AbstractApiClient {
     return this.baseUrl;
   }
 
+  /**
+   * 换 DSH 地址（DSH 桌面版 0.2.1 起每次启动换随机端口）。Cookie 的名字与签名绑定 host:port，
+   * 所以换地址必须让旧凭据失效。返回是否真的变了。
+   */
+  setBaseUrl(url) {
+    const next = String(url ?? '').replace(/\/+$/, '');
+    if (!next || next === this.baseUrl) return false;
+    this.baseUrl = next;
+    this.invalidateAuth();
+    return true;
+  }
+
   /** 使当前 Cookie/launch token 失效；DSH 重启或 401 后会自动重新发现最新 token。 */
   invalidateAuth() {
     this._authEpoch += 1;
@@ -979,6 +991,10 @@ export function createTurnCollector() {
     },
     has(turn) {
       return turns.has(turn);
+    },
+    /** 当前仍在跟踪（有 start 无 end）的回合数。供调用方判断 collector 是否已成空壳。 */
+    size() {
+      return turns.size;
     }
   };
 }
