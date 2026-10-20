@@ -9,6 +9,12 @@
 //   ❌ 不下载、不解压、不复制、不修改 SnowLuma 的任何程序文件或专有组件（native/*.node/.dll）；
 //   ❌ 不自动启动 —— 启动只在用户点击「启动 SnowLuma」时发生（见 control-center.mjs）。
 //
+// 发行包布局（对照 1.14.22 与 2.0.3 的发行包核对）：
+//   · Windows：launcher.bat；完整版自带 node.exe。
+//   · Linux（2.0 起正式支持 x64 / arm64）：launcher.sh；完整版自带 ./node。
+//   · 2.0 起 package.json 写明 engines.node（>=24），release.json 写明目标平台（win-x64 / linux-x64 / linux-arm64）。
+//   · 账号配置的位置和格式两版相同：config/onebot_<QQ号>.json 的 networks.wsServers。
+//
 // SnowLuma 的数据位置（对照 1.14.22 源码 packages/common/src/runtime.ts 等，都是相对它的安装目录）：
 //   config/   账号、OneBot 实例配置（onebot_<QQ号>.json）、runtime.json、WebUI 密码与证书
 //   data/     按 QQ 号分的运行数据
@@ -38,21 +44,53 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+/** 本机对应的 SnowLuma 发行包目标名（win-x64 / linux-x64 / linux-arm64）；没有对应发行包的系统返回 null。 */
+export function snowlumaTargetFor(platform = process.platform, arch = process.arch) {
+  if (platform === 'win32') return 'win-x64';
+  if (platform === 'linux') return arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
+  return null;
+}
+
+/** 从 engines.node（如 ">=24"、">=22.13.0"）读出最低主版本号；读不出返回 null。 */
+export function minNodeMajor(range) {
+  const m = /(\d+)/.exec(String(range ?? ''));
+  return m ? Number(m[1]) : null;
+}
+
 /**
  * 检查一个目录是不是 SnowLuma 的发行包目录。
- * @returns {{ok:boolean, error?:string, dir, version, edition:'full'|'lite', hasNodeExe, launcher, webui:{host,port}, dataDirs:string[]}}
+ * @returns {{ok:boolean, error?:string, dir, version, edition:'full'|'lite', hasNodeExe, hasNodeBin, launcher, launchers:{bat,sh},
+ *   nodeRequirement, nodeOk, target, targetOk, webui:{host,port}, dataDirs:string[]}}
  */
-export function inspectSnowLumaDir(dir) {
+export function inspectSnowLumaDir(dir, { platform = process.platform, arch = process.arch, nodeVersion = process.versions.node } = {}) {
   const d = path.resolve(String(dir ?? ''));
   if (!dir || !fs.existsSync(d) || !fs.statSync(d).isDirectory()) return { ok: false, error: '目录不存在' };
   const pkg = readJson(path.join(d, 'package.json'));
   if (!pkg || pkg.name !== '@snowluma/runtime') {
-    return { ok: false, error: '这不是 SnowLuma 的发行包目录（找不到 name 为 @snowluma/runtime 的 package.json）。请选择解压后含 launcher.bat、index.mjs 的那一层目录。' };
+    return { ok: false, error: '这不是 SnowLuma 的发行包目录（找不到 name 为 @snowluma/runtime 的 package.json）。请选择解压后含 launcher.bat（Windows）或 launcher.sh（Linux）、index.mjs 的那一层目录。' };
   }
-  const launcher = path.join(d, 'launcher.bat');
+  const bat = path.join(d, 'launcher.bat');
+  const sh = path.join(d, 'launcher.sh');
+  const launchers = { bat: fs.existsSync(bat) ? bat : null, sh: fs.existsSync(sh) ? sh : null };
+  // 本机用哪个启动脚本：Linux 用 launcher.sh；其他系统沿用原来的 launcher.bat（Windows / macOS 行为不变）
+  const launcher = platform === 'linux' ? launchers.sh : launchers.bat;
   const entry = path.join(d, 'index.mjs');
   if (!fs.existsSync(entry)) return { ok: false, error: '目录里缺少 index.mjs' };
   const hasNodeExe = fs.existsSync(path.join(d, 'node.exe'));
+  const hasNodeBin = (() => { try { return fs.statSync(path.join(d, 'node')).isFile(); } catch { return false; } })();
+  const bundledNode = platform === 'win32' ? hasNodeExe : hasNodeBin;
+  // Node 版本要求：2.0 起写在 engines.node；Lite 版用本机 node，版本不够时启动前就说明
+  const nodeRequirement = typeof pkg.engines?.node === 'string' ? pkg.engines.node : null;
+  const need = minNodeMajor(nodeRequirement);
+  const have = Number(String(nodeVersion ?? '').split('.')[0]) || 0;
+  const nodeOk = bundledNode || need === null ? true : have >= need;
+  // 目标平台：2.0 起写在 release.json；与本机不符（例如在 Linux 上选了 Windows 包）时启动前就说明
+  const release = readJson(path.join(d, 'release.json'));
+  const target = typeof release?.target === 'string' ? release.target : null;
+  const wantTarget = snowlumaTargetFor(platform, arch);
+  // Windows 包的 release.json 写的是 win32-x64（下载文件名里是 win-x64），两种写法都认
+  const norm = (t) => String(t ?? '').replace(/^win32-/, 'win-');
+  const targetOk = target === null || wantTarget === null ? null : norm(target) === wantTarget;
   const runtime = readJson(path.join(d, 'config', 'runtime.json')) ?? {};
   const port = Number(runtime.webuiPort) > 0 && Number(runtime.webuiPort) < 65536 ? Number(runtime.webuiPort) : 5099;
   const host = typeof runtime.webuiHost === 'string' && runtime.webuiHost ? runtime.webuiHost : '127.0.0.1';
@@ -61,9 +99,16 @@ export function inspectSnowLumaDir(dir) {
     ok: true,
     dir: d,
     version: String(pkg.version ?? '未知'),
-    edition: hasNodeExe ? 'full' : 'lite',
+    edition: bundledNode || hasNodeExe || hasNodeBin ? 'full' : 'lite',
     hasNodeExe,
-    launcher: fs.existsSync(launcher) ? launcher : null,
+    hasNodeBin,
+    launcher,
+    launchers,
+    nodeRequirement,
+    nodeOk,
+    target,
+    targetOk,
+    expectedTarget: wantTarget,
     webui: { host, port, url: `${tls ? 'https' : 'http'}://${host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host}:${port}/` },
     dataDirs: USER_DATA_DIRS.filter((x) => fs.existsSync(path.join(d, x))),
     accounts: (() => {
@@ -73,12 +118,23 @@ export function inspectSnowLumaDir(dir) {
 }
 
 /**
- * 启动命令：按 SnowLuma 自带 launcher.bat 的做法运行（先校验 Node 版本，再 node ./index.mjs），
- * 以发行包原样提供的形式运行，不改任何文件。完整版用包里自带的 node.exe，Lite 版用系统 PATH 里的 node。
+ * 启动命令：按 SnowLuma 自带的启动脚本原样运行（脚本自己先校验 Node 版本，再 node ./index.mjs），不改任何文件。
+ *   · Windows：cmd.exe /c launcher.bat（完整版用包里的 node.exe，Lite 版用系统 PATH 里的 node）；
+ *   · Linux：bash ./launcher.sh（优先用包里的 ./node，没有就用 PATH 里的 node）。
+ * 发行包与本机平台不符、或 Lite 版而本机 Node 版本不够时，不启动并说明原因。
  */
-export function snowlumaLaunchSpec(info) {
+export function snowlumaLaunchSpec(info, { platform = process.platform, nodeVersion = process.versions.node } = {}) {
   if (!info?.ok) return { error: info?.error ?? '未选择 SnowLuma 目录' };
-  if (info.launcher && process.platform === 'win32') {
+  if (info.targetOk === false) {
+    return { error: `这个 SnowLuma 发行包是 ${info.target} 版，本机需要 ${info.expectedTarget ?? '（本系统没有 SnowLuma 发行包）'} 版：请到 SnowLuma 发布页下载对应的包` };
+  }
+  if (info.nodeOk === false) {
+    return { error: `这个 SnowLuma Lite 版需要 Node.js ${info.nodeRequirement}，本机是 ${nodeVersion}：请安装更新的 Node.js，或改用自带 Node 的完整版` };
+  }
+  if (platform === 'linux' && info.launcher) {
+    return { command: 'bash', args: ['./launcher.sh'], cwd: info.dir, display: `${path.join(info.dir, 'launcher.sh')}` };
+  }
+  if (info.launcher && platform === 'win32') {
     return {
       command: path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe'),
       args: ['/d', '/s', '/c', 'launcher.bat'],
@@ -91,7 +147,7 @@ export function snowlumaLaunchSpec(info) {
 }
 
 /** 查询最新 Release（只读）。 */
-export async function checkSnowLumaUpdate(currentVersion, { fetchImpl = globalThis.fetch, timeoutMs = 10000 } = {}) {
+export async function checkSnowLumaUpdate(currentVersion, { fetchImpl = globalThis.fetch, timeoutMs = 10000, platform = process.platform, arch = process.arch } = {}) {
   const res = await fetchImpl(SNOWLUMA_RELEASES_API, {
     headers: { accept: 'application/vnd.github+json', 'user-agent': 'qq-bridge-enhanced-control-center' },
     signal: AbortSignal.timeout(timeoutMs),
@@ -107,8 +163,14 @@ export async function checkSnowLumaUpdate(currentVersion, { fetchImpl = globalTh
     publishedAt: rel.published_at ?? null,
     pageUrl: rel.html_url || SNOWLUMA_RELEASES_PAGE,
     notes: String(rel.body ?? '').slice(0, 4000),
-    // 只告诉用户该下载哪个文件（完整版 = win-x64，不含 lite），不下载。
-    suggestedAsset: assets.find((n) => /win-x64\.zip$/i.test(n) && !/lite/i.test(n)) ?? null,
+    // 只告诉用户该下载哪个文件（本机对应平台的完整版，不含 lite），不下载。Windows：win-x64.zip；Linux：linux-x64 / linux-arm64 .tar.gz
+    suggestedAsset: (() => {
+      const t = snowlumaTargetFor(platform, arch) ?? 'win-x64';
+      const ext = t.startsWith('win') ? '\\.zip' : '\\.tar\\.gz';
+      const re = new RegExp(`${t}${ext}$`, 'i');
+      return assets.find((n) => re.test(n) && !/lite/i.test(n)) ?? null;
+    })(),
+    archive: (snowlumaTargetFor(platform, arch) ?? 'win-x64').startsWith('win') ? 'zip' : 'tar.gz',
   };
 }
 

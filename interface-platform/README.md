@@ -2,11 +2,11 @@
 
 把聊天平台的账号、事件和发送统一管理起来，桥接只面对一个接口；具体后端（SnowLuma、将来的 Mac 原生接入、Discord 等）是可以替换的连接器。
 
-当前进度：**M1**（见 [docs/MILESTONES.md](docs/MILESTONES.md)）。只有 QQ，有两个连接器：SnowLuma（Windows）和 NapCat（macOS / Windows），都连接用户自己运行的后端。M1 不是完整交付。
+当前进度：**M1**（见 [docs/MILESTONES.md](docs/MILESTONES.md)）。只有 QQ，有两个连接器：SnowLuma（Windows / Linux）和 NapCat（macOS / Windows / Linux），都连接用户自己运行的后端。M1 不是完整交付。
 
 ```text
-DeepSeek / DSH ↔ 桥接 ↔ 接口平台 ┬ SnowLuma 连接器 ↔ SnowLuma（Windows）↔ QQ
-                                  └ NapCat 连接器   ↔ NapCat（macOS / Windows）↔ QQ
+DeepSeek / DSH ↔ 桥接 ↔ 接口平台 ┬ SnowLuma 连接器 ↔ SnowLuma（Windows / Linux）↔ QQ
+                                  └ NapCat 连接器   ↔ NapCat（macOS / Windows / Linux）↔ QQ
 ```
 
 ## 运行

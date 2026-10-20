@@ -1,5 +1,7 @@
 # QQ ↔ DeepSeek Harness 桥接
 
+**支持系统：Windows · macOS · Linux**（qq-bridge-enhanced v1.0.1）
+
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
 > 🗂️ 文档索引见 **[docs/README.md](docs/README.md)**；仓库目录/脚本命名约定见 **[docs/FOLDER_MAP.md](docs/FOLDER_MAP.md)**。
@@ -12,7 +14,7 @@
 
 ---
 
-## 🆕 增强版（qq-bridge-enhanced）
+## 🆕 增强版（qq-bridge-enhanced v1.0.1）—— 支持 Windows、macOS、Linux
 
 > 本仓库是 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 的二次开发版本（来源与授权见 [NOTICE.md](NOTICE.md)），已合并上游 r4 的修复。
 > 原版的全部功能（消息桥接、多群白名单、reserved2 二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查）保持不变；
@@ -20,7 +22,7 @@
 
 | 新功能 | 一句话 | 文档 |
 | --- | --- | --- |
-| **Windows + macOS** | Windows 用 SnowLuma 或 NapCat，macOS 用 NapCat；两边都有无窗口启动入口 | [DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) |
+| **Windows + macOS + Linux** | Windows / Linux 用 SnowLuma 2.x 或 NapCat，macOS 用 NapCat；三个系统都有无窗口启动方式 | [DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) |
 | **接口平台** | 仓库里的 `interface-platform/`：桥接和 QQ 后端之间的统一接入层，按后端目录自动发现账号，可同时接 SnowLuma 与 NapCat；为以后接微信 / Discord / KOOK 留好接口 | [interface-platform/README.md](interface-platform/README.md) |
 | **控制中心** | 一个本地网页管理桥接、接口平台和 QQ 后端：按钮启停（QQ 后端只由你点击启动）、版本与更新检查、NapCat 扫码二维码直接显示、整体状态栏 | [CONTROL_CENTER.md](docs/guides/CONTROL_CENTER.md) |
 | 跨群认人 | 只认 QQ 号：同一个人在不同群换了群名片也能认出来；同名不同号绝不合并 | [CONTINUITY.md](docs/guides/CONTINUITY.md) |
@@ -36,18 +38,19 @@
 ### 部署（无窗口版）
 
 需要：Node.js ≥ 22.13、DSH 桌面版或命令行版（0.2.0-rc.2 / 0.2.1，先在 DSH 里配好模型账号）、你自己安装并能登录的 QQ 后端
-（**Windows**：SnowLuma 完整版或 NapCat.Shell；**macOS**：Mac 版 QQ + [NapCat Mac 安装器](https://github.com/NapNeko/NapCat-Mac-Installer/releases)，
-并在 NapCat 的 WebUI 里开启 WebSocket 服务端 `127.0.0.1:3001`）。本项目不下载、不安装 QQ 后端。
+（**Windows**：SnowLuma 完整版或 NapCat.Shell；**macOS**：Mac 版 QQ + [NapCat Mac 安装器](https://github.com/NapNeko/NapCat-Mac-Installer/releases)；
+**Linux**（x64 / arm64）：SnowLuma 2.x 完整版（`…-linux-x64.tar.gz` / `…-linux-arm64.tar.gz`，需要本机能运行 Linux 版 QQ）或 NapCat；
+NapCat 要在它的 WebUI 里开启 WebSocket 服务端 `127.0.0.1:3001`）。本项目不下载、不安装 QQ 后端。
 
 **第一次安装**（在项目目录的终端里，只做一次）：
 
-| 步骤 | Windows（PowerShell） | macOS（终端） |
+| 步骤 | Windows（PowerShell） | macOS / Linux（终端） |
 | --- | --- | --- |
 | 装依赖 | `npm ci` | `npm ci` |
 | 写配置 | `Copy-Item config.example.json config.json` | `cp config.example.json config.json` |
 | 改配置 | 填 `ownerQQ`、`allow.groups` / `allow.private`、`dsh.provider`（[字段说明](docs/guides/CONFIGURATION.md)） | 同左 |
 | 装到 DSH | `node scripts\setup-dsh.mjs`，然后**重启 DSH** | `node scripts/setup-dsh.mjs`，然后**重启 DSH** |
-| 无窗口入口 | 已自带 `control-center-hidden.vbs` | `npm run mac-app` → 生成「QQ Bridge 控制中心.app」 |
+| 无窗口入口 | 已自带 `control-center-hidden.vbs` | **macOS**：双击一次 `control-center.command`，第一次运行会自动生成「QQ Bridge 控制中心.app」并在访达里选中它（也可以手动 `npm run mac-app`）<br>**Linux**：`npm run linux-service -- --enable`，生成并启动 systemd 用户服务（后台常驻、登录自动启动） |
 
 `snowluma.*`（连接 QQ 后端的地址、令牌）不用手填，下面「接入桥接」会自动写好。可选：`npm run test:audit` 离线自检、`npm run admin:totp-setup`（L3 的 TOTP）。
 
@@ -55,14 +58,16 @@
 
 1. 双击无窗口入口（Windows：`control-center-hidden.vbs`；macOS：「QQ Bridge 控制中心.app」），浏览器打开控制中心。
    macOS 第一次会问「“QQ Bridge 控制中心”想访问其他 App 的数据」——点**允许**（要读 QQ 容器里的 NapCat 配置，只问一次）。
+   Linux：服务启动后打开 `http://127.0.0.1:3099/#t=<state/control-center-token 的内容>`（有桌面时也可以双击「QQ Bridge 控制中心」启动项）；
+   服务器上从别的电脑访问，先 `ssh -L 3099:127.0.0.1:3099 <服务器>` 转发。
 2. **接口平台 → 概览**，在后端卡片上点「开启」：
-   - Windows · SnowLuma：先在「接入实例 → 本机 SnowLuma 程序」里「浏览…」选中 SnowLuma 目录，再点「开启 SnowLuma」，第一次在它的 WebUI 里扫码；
-   - NapCat：点「开启 NapCat」（Windows 先在「管理 NapCat 程序 → NapCat 设置」里选启动文件）；要扫码时卡片上直接显示二维码。
+   - Windows / Linux · SnowLuma：先在「接入实例 → 本机 SnowLuma 程序」里「浏览…」选中 SnowLuma 目录，再点「开启 SnowLuma」，第一次在它的 WebUI 里扫码；
+   - NapCat：点「开启 NapCat」（Windows / Linux 先在「管理 NapCat 程序 → NapCat 设置」里选启动文件，Linux 再选 NapCat 目录）；要扫码时卡片上直接显示二维码。
 3. **接口平台 → 设置**，点「接入桥接」。
 4. **桥接** 标签点「启动桥接」。底部状态栏全绿（接口平台「1 账号就绪 · 桥接已接入」、QQ「在线 <机器人>」、DSH「已就绪」）即完成。
 
 **日常**：双击无窗口入口 → 开启后端 → 启动桥接；退出用页面右上角「退出控制中心」（会一起停掉桥接、接口平台和它启动的 QQ 后端）。
-更新项目或挪了目录后，macOS 重新运行一次 `npm run mac-app`。不要同时用 `start.bat` / `npm start` 和控制中心启动桥接。
+更新项目或挪了目录后，macOS 重新运行一次 `npm run mac-app`，Linux 重新运行一次 `npm run linux-service -- --enable`。不要同时用 `start.bat` / `npm start` 和控制中心启动桥接。
 
 给 DSH agent 执行的逐步部署说明（含检查命令、预期输出、常见错误、更新 / 备份 / 回滚）：**[docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md)**。
 配置字段：[docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md)。测试：[docs/guides/TESTING.md](docs/guides/TESTING.md)。

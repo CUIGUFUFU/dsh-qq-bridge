@@ -15,7 +15,8 @@
 | --- | --- |
 | `control-center.bat` | 打开一个小命令行窗口（关掉它 = 退出控制中心及其启动的进程），并自动打开浏览器 |
 | `control-center-hidden.vbs` | **没有窗口**，只打开浏览器页面；退出用页面右上角的「退出控制中心」 |
-| `QQ Bridge 控制中心.app`（macOS，`npm run mac-app` 在本机生成） | **没有窗口**、没有 Dock 图标，只打开浏览器页面；再次双击重新打开页面；退出用页面右上角的「退出控制中心」（App 随之退出）。第一次读 NapCat 配置时 macOS 会以这个 App 的名义问「访问其他 App 的数据」，点**允许**一次即可。App 不入库：换了仓库位置或更新后重新运行 `npm run mac-app` |
+| `QQ Bridge 控制中心.app`（macOS，本机生成：第一次双击 `control-center.command` 时自动生成，或 `npm run mac-app`） | **没有窗口**、没有 Dock 图标，只打开浏览器页面；再次双击重新打开页面；退出用页面右上角的「退出控制中心」（App 随之退出）。第一次读 NapCat 配置时 macOS 会以这个 App 的名义问「访问其他 App 的数据」，点**允许**一次即可。App 不入库：换了仓库位置或更新后重新运行 `npm run mac-app` |
+| systemd 用户服务（Linux，`npm run linux-service -- --enable` 生成） | 后台常驻、登录后自动启动、崩溃自动重启，不弹浏览器；有桌面时另有「QQ Bridge 控制中心」启动项可双击打开页面。服务器上用 `ssh -L 3099:127.0.0.1:3099` 转发后访问 |
 | `control-center.command`（macOS） | 双击在「终端」里打开（关掉终端窗口 = 退出控制中心及其启动的进程）。第一次读 NapCat 配置时 macOS 会问「终端想访问其他 App 的数据」，点**允许**一次即可 |
 
 也可以 `npm run control-center`。页面地址是 `http://127.0.0.1:3099/`（端口可在 `state\control-center.json` 的 `port` 修改，或用环境变量 `QQ_BRIDGE_CONTROL_PORT`）。
@@ -126,6 +127,8 @@ NapCat 日志里也会在生成二维码的位置插一张能扫的小图（日�
 | 检查更新 | 只读 GitHub `NapNeko/NapCatQQ` 的最新 Release，提示有没有新版本和更新说明，**不下载、不安装**。「打开下载页」：macOS 打开 NapCat Mac 安装器的发布页，Windows 打开 NapCatQQ 的发布页（建议 `NapCat.Shell.Windows.OneKey.zip`） |
 | NapCat 设置 | macOS：QQ.app 位置；Windows：NapCat.Shell 的启动文件（.bat / .cmd / .exe）；两者都有 NapCat 目录（含 `config/onebot11_<QQ号>.json`）和可选的快速登录 QQ 号。留空 = 默认位置。保存在 `state/control-center.json`；改目录会同步给接口平台的 NapCat 实例 |
 | 浏览… | 弹出系统自带的选择窗口（macOS：`osascript` 的 choose folder / choose file；Windows：PowerShell 的文件夹 / 文件对话框），只在你点击时出现，可能在浏览器窗口后面。SnowLuma 的「浏览…」在 macOS 上也能用了 |
+
+Linux 上 SnowLuma（2.0 起）和 NapCat 都可用：SnowLuma 按发行包自带的 `launcher.sh` 启动，发行包与本机平台 / 架构不符、或 Lite 版本机 Node 不够时会直接说明原因；NapCat 在「NapCat 设置」里选 `.sh` 启动脚本和 NapCat 目录。「浏览…」在有 zenity / kdialog 时弹出系统窗口，否则手动填路径。
 
 macOS 上没有 SnowLuma：QQ 经 **NapCat** 接入（自己安装并启动 NapCat、开启 WebSocket 服务端，再在「接入实例」里填 NapCat 配置目录或 WS 地址 + 令牌）；页面上不会出现 SnowLuma 程序区。
 

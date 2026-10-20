@@ -101,6 +101,10 @@ const tests = [
   'test-qq-backend-label.mjs',
   // macOS 无窗口启动 App（npm run mac-app 生成，不入库）：脚本约定；macOS 上实际编译一次。
   'test-mac-app.mjs',
+  // DSH 探活：连续 2 次失败才判定不可用（偶发一次只在恢复时记一笔），失败原因分类（超时 / 连接被拒 / 其他）。
+  'test-dsh-health.mjs',
+  // Linux 支持（增量，Windows / macOS 行为不变）：SnowLuma 2.x 发行包识别与启动、Node 要求、按平台的更新建议、Linux「浏览…」、NapCat 在 Linux、systemd 用户服务。
+  'test-linux-support.mjs',
   // AI 收藏表情的后端适配：SnowLuma 照旧 base64://；NapCat 只收本地路径时改用桥接自建的受控临时文件（用完即删）。
   'test-sticker-collect.mjs',
 ];

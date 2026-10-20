@@ -660,7 +660,9 @@ export async function startControlCenter({ open = true, port: portOverride = nul
         const PURPOSES = {
           'napcat-home': { kind: 'folder', title: '选择 NapCat 的目录（含 config/onebot11_<QQ号>.json）', initialDir: napcatDefaultHome(settings) },
           'napcat-qqapp': { kind: 'app', title: '选择已切换为 NapCat 入口的 QQ.app', initialDir: '/Applications' },
-          'napcat-command': { kind: 'file', title: '选择 NapCat 启动文件（NapCat.Shell 里的 .bat / .exe）', initialDir: settings.napcatCommand ? path.dirname(settings.napcatCommand) : '', extensions: ['bat', 'cmd', 'exe'] },
+          'napcat-command': process.platform === 'linux'
+            ? { kind: 'file', title: '选择 NapCat 启动文件（.sh 脚本或可执行文件）', initialDir: settings.napcatCommand ? path.dirname(settings.napcatCommand) : '', extensions: [] }
+            : { kind: 'file', title: '选择 NapCat 启动文件（NapCat.Shell 里的 .bat / .exe）', initialDir: settings.napcatCommand ? path.dirname(settings.napcatCommand) : '', extensions: ['bat', 'cmd', 'exe'] },
           'snowluma-dir': { kind: 'folder', title: '选择 SnowLuma 的解压目录（含 launcher.bat 的那一层）', initialDir: settings.snowlumaDir || ROOT },
         };
         const spec = PURPOSES[String(body.purpose ?? '')];

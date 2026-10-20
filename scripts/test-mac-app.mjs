@@ -22,6 +22,17 @@ test('App 脚本：后台启动控制中心（nohup、输出进日志、不占 s
   assert.ok(!/QQ\.app|napcat/i.test(s), 'App 不启动 QQ / NapCat，只启动控制中心');
 });
 
+test('control-center.command 第一次运行时自动生成 App：只在 App 不存在时生成、失败不影响启动、可用环境变量关闭', () => {
+  const s = fs.readFileSync(path.join(root, 'control-center.command'), 'utf8');
+  const gen = s.indexOf('node scripts/build-mac-app.mjs');
+  const start = s.indexOf('node src/launcher/control-center.mjs');
+  assert.ok(gen > 0 && start > gen, '先（按需）生成 App，再启动控制中心');
+  assert.match(s, /if \[\[ ! -d "\$APP" && -z "\$QQ_BRIDGE_NO_MAC_APP" \]\]; then/, '只在 App 不存在、且没关掉时生成');
+  assert.match(s, /APP="QQ Bridge 控制中心\.app"/);
+  assert.match(s, /else\n\s+echo "\[qq-bridge\] 没能生成 App/, '生成失败只提示，不退出');
+  assert.ok(!/build-mac-app\.mjs[^\n]*\|\|\s*exit/.test(s), '生成失败不会中断启动');
+});
+
 test('不入库：生成的 .app 在 .gitignore 里；有 npm run mac-app', () => {
   assert.match(fs.readFileSync(path.join(root, '.gitignore'), 'utf8'), /^\/\*\.app\/$/m);
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts['mac-app'], 'node scripts/build-mac-app.mjs');

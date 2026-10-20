@@ -1,19 +1,21 @@
 # QQ ↔ DeepSeek Harness Bridge (qq-bridge-enhanced)
 
+**Supported systems: Windows · macOS · Linux** (qq-bridge-enhanced v1.0.1)
+
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
-> **qq-bridge-enhanced v1.0.0** — a fork of [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 (with the upstream r4 fixes merged in; origin and licensing in [NOTICE.md](NOTICE.md)).
-> It turns one QQ account into an "AI group member" driven by DeepSeek Harness (DSH) agents, and now runs on **Windows and macOS**.
+> **qq-bridge-enhanced v1.0.1** — a fork of [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 (with the upstream r4 fixes merged in; origin and licensing in [NOTICE.md](NOTICE.md)).
+> It turns one QQ account into an "AI group member" driven by DeepSeek Harness (DSH) agents, and runs on **Windows, macOS and Linux**.
 > Most documentation is in Chinese: the step-by-step deployment guide is [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md), the changelog is [CHANGELOG.md](CHANGELOG.md),
 > and the documentation index is [docs/README.md](docs/README.md).
 
 QQ friends/groups become DSH conversations, and agent replies (including questions and tool approvals) are sent back to QQ.
 
-## What's in v1.0.0
+## What's in v1.0.x
 
 | Feature | In one line | Doc (Chinese) |
 | --- | --- | --- |
-| **Windows + macOS** | Windows uses SnowLuma or NapCat as the QQ backend, macOS uses NapCat; both have a no-window launcher | [DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) |
+| **Windows + macOS + Linux** | Windows / Linux use SnowLuma 2.x or NapCat as the QQ backend, macOS uses NapCat; all three have a no-window way to start | [DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) |
 | **Interface platform** | `interface-platform/` (in this repo): a unified access layer between the bridge and QQ backends. Discovers accounts from the backend's folder, can serve SnowLuma and NapCat at the same time, and leaves room for WeChat / Discord / KOOK connectors later | [interface-platform/README.md](interface-platform/README.md) |
 | **Control center** | One local web page for the bridge, the interface platform and the QQ backends: start/stop buttons (QQ backends are only ever started by you), version and update checks, the NapCat login QR code shown right on the page, an overall status bar | [CONTROL_CENTER.md](docs/guides/CONTROL_CENTER.md) |
 | Cross-group identity | People are identified by QQ number only — same person, different group nicknames, still one person; same nickname, different numbers, never merged | [CONTINUITY.md](docs/guides/CONTINUITY.md) |
@@ -27,18 +29,19 @@ QQ friends/groups become DSH conversations, and agent replies (including questio
 ## Deployment (no-window launchers)
 
 You need: Node.js ≥ 22.13; the DSH desktop app or CLI (0.2.0-rc.2 / 0.2.1) with a model account configured inside DSH; and a QQ backend that **you** install and log in to —
-**Windows**: SnowLuma (full build) or NapCat.Shell; **macOS**: QQ for Mac + the [NapCat Mac installer](https://github.com/NapNeko/NapCat-Mac-Installer/releases),
-with a WebSocket server enabled in NapCat's WebUI at `127.0.0.1:3001`. This project never downloads or installs a QQ backend.
+**Windows**: SnowLuma (full build) or NapCat.Shell; **macOS**: QQ for Mac + the [NapCat Mac installer](https://github.com/NapNeko/NapCat-Mac-Installer/releases);
+**Linux** (x64 / arm64): SnowLuma 2.x full build (`…-linux-x64.tar.gz` / `…-linux-arm64.tar.gz`, needs the Linux QQ client on the machine) or NapCat;
+NapCat needs a WebSocket server enabled in its WebUI at `127.0.0.1:3001`. This project never downloads or installs a QQ backend.
 
 **One-time install** (in a terminal, in the project folder):
 
-| Step | Windows (PowerShell) | macOS (Terminal) |
+| Step | Windows (PowerShell) | macOS / Linux (Terminal) |
 | --- | --- | --- |
 | Dependencies | `npm ci` | `npm ci` |
 | Config file | `Copy-Item config.example.json config.json` | `cp config.example.json config.json` |
 | Edit config | Fill in `ownerQQ`, `allow.groups` / `allow.private`, `dsh.provider` ([fields](docs/guides/CONFIGURATION.md)) | same |
 | Install into DSH | `node scripts\setup-dsh.mjs`, then **restart DSH** | `node scripts/setup-dsh.mjs`, then **restart DSH** |
-| No-window launcher | `control-center-hidden.vbs` is included | `npm run mac-app` → creates "QQ Bridge 控制中心.app" |
+| No-window launcher | `control-center-hidden.vbs` is included | **macOS**: double-click `control-center.command` once - the first run creates "QQ Bridge 控制中心.app" and selects it in Finder (or run `npm run mac-app`)<br>**Linux**: `npm run linux-service -- --enable` creates and starts a systemd user service (runs in the background, starts at login) |
 
 You don't fill in `snowluma.*` (the backend address and token) by hand — "接入桥接" (link bridge) below writes it for you.
 Optional: `npm run test:audit` (offline self-check), `npm run admin:totp-setup` (TOTP for L3).
@@ -47,14 +50,16 @@ Optional: `npm run test:audit` (offline self-check), `npm run admin:totp-setup` 
 
 1. Double-click the no-window launcher (Windows: `control-center-hidden.vbs`; macOS: "QQ Bridge 控制中心.app"). The control center opens in your browser.
    On macOS the system asks once whether "QQ Bridge 控制中心" may access data from other apps — click **Allow** (it reads NapCat's config inside QQ's container).
+   Linux: once the service is running, open `http://127.0.0.1:3099/#t=<contents of state/control-center-token>` (on a desktop, the "QQ Bridge 控制中心" launcher also works);
+   on a server, forward the port first with `ssh -L 3099:127.0.0.1:3099 <server>`.
 2. **接口平台 (Interface platform) → 概览 (Overview)**: click "开启" (turn on) on a backend card:
-   - Windows · SnowLuma: first pick the SnowLuma folder under "接入实例 → 本机 SnowLuma 程序" with "浏览…", then "开启 SnowLuma"; scan the QR code in SnowLuma's WebUI the first time;
-   - NapCat: "开启 NapCat" (on Windows, pick the launch file first in "管理 NapCat 程序 → NapCat 设置"); when a scan is needed, the QR code appears right on the card.
+   - Windows / Linux · SnowLuma: first pick the SnowLuma folder under "接入实例 → 本机 SnowLuma 程序" with "浏览…", then "开启 SnowLuma"; scan the QR code in SnowLuma's WebUI the first time;
+   - NapCat: "开启 NapCat" (on Windows / Linux, pick the launch file first in "管理 NapCat 程序 → NapCat 设置"; on Linux also pick the NapCat folder); when a scan is needed, the QR code appears right on the card.
 3. **接口平台 → 设置 (Settings)**: click "接入桥接" (link bridge).
 4. **桥接 (Bridge)** tab: click "启动桥接" (start bridge). Done when the status bar is all green (interface platform "1 账号就绪 · 桥接已接入", QQ "在线 <bot>", DSH "已就绪").
 
 **Every day:** double-click the launcher → turn on the backend → start the bridge. To quit, use "退出控制中心" at the top right of the page (it also stops the bridge,
-the interface platform and the QQ backend it started). On macOS, run `npm run mac-app` again after updating or moving the project.
+the interface platform and the QQ backend it started). After updating or moving the project, run `npm run mac-app` again on macOS, or `npm run linux-service -- --enable` on Linux.
 Don't start the bridge with `start.bat` / `npm start` while the control center is also running it.
 
 The full guide for a DSH agent (checks, expected output, common errors, update / backup / rollback) is **[docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md)**.
@@ -63,7 +68,7 @@ The full guide for a DSH agent (checks, expected output, common errors, update /
 
 ```
 QQ client (bot account)
-   ⇅  SnowLuma (Windows) or NapCat (macOS / Windows) — OneBot v11 WebSocket (default 3001)
+   ⇅  SnowLuma (Windows / Linux) or NapCat (macOS / Windows / Linux) — OneBot v11 WebSocket (default 3001)
 Interface platform (127.0.0.1:3120; OneBot-compatible entry /onebot/v11/ws)
    ⇅
 qq-bridge (bridge console 127.0.0.1:3100)  ──►  DSH Web API (desktop app or `dsh web`)

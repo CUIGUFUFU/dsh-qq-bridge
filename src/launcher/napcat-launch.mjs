@@ -4,6 +4,8 @@
 //   · macOS：NapCat 安装器把 QQ.app 的 package.json main 改成 NapCat 的 loadNapCat.js；之后以
 //            `QQ.app/Contents/MacOS/QQ --no-sandbox` 启动即运行 NapCat（日志与登录二维码打印在标准输出）。
 //   · Windows：由用户在设置里指定 NapCat 的启动文件（NapCat.Shell 包里的 .bat / .exe），按原样运行。
+//   · Linux：同样由用户指定启动文件（NapCat 安装脚本装好后的启动脚本 .sh，或可执行文件），按原样运行；
+//            无图形界面的服务器上通常是 NapCat 文档里那条 xvfb-run … qq --no-sandbox 的命令，写进一个 .sh 再选它。
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -52,8 +54,8 @@ export function napcatAutoLoginAccount(settings = {}, { now = Date.now(), read =
 }
 
 /** 检查本机 NapCat 是否可由控制中心启动。返回 { ok, error?, command, args, entry? }。 */
-export function inspectNapCat(settings = {}) {
-  if (process.platform === 'darwin') {
+export function inspectNapCat(settings = {}, { platform = process.platform } = {}) {
+  if (platform === 'darwin') {
     const app = macQQApp(settings);
     const bin = path.join(app, 'Contents', 'MacOS', 'QQ');
     if (!fs.existsSync(bin)) return { ok: false, error: `找不到 QQ：${app}` };
@@ -63,13 +65,21 @@ export function inspectNapCat(settings = {}) {
     const args = ['--no-sandbox', ...quickLoginArgs(settings)];
     return { ok: true, command: bin, args, entry: 'napcat', quickLogin: args.includes('-q') || !!napcatAutoLoginAccount(settings), display: `${bin} ${args.join(' ')}` };
   }
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     const cmd = String(settings.napcatCommand ?? '').trim();
     if (!cmd) return { ok: false, error: '还没有设置 NapCat 启动文件（state/control-center.json 的 napcatCommand，指向 NapCat.Shell 包里的启动 .bat / .exe）' };
     if (!fs.existsSync(cmd)) return { ok: false, error: `找不到 NapCat 启动文件：${cmd}` };
     const q = quickLoginArgs(settings);
     if (/\.(bat|cmd)$/i.test(cmd)) return { ok: true, command: path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe'), args: ['/d', '/c', cmd, ...q], cwd: path.dirname(cmd), quickLogin: q.length > 0, display: [cmd, ...q].join(' ') };
     return { ok: true, command: cmd, args: q, cwd: path.dirname(cmd), quickLogin: q.length > 0, display: [cmd, ...q].join(' ') };
+  }
+  if (platform === 'linux') {
+    const cmd = String(settings.napcatCommand ?? '').trim();
+    if (!cmd) return { ok: false, error: '还没有设置 NapCat 启动文件：在「NapCat 设置」里选择启动 NapCat 的 .sh 脚本或可执行文件（也可以自己启动 NapCat，接口平台照样可以连接）' };
+    if (!fs.existsSync(cmd)) return { ok: false, error: `找不到 NapCat 启动文件：${cmd}` };
+    const q = quickLoginArgs(settings);
+    if (/\.sh$/i.test(cmd)) return { ok: true, command: 'bash', args: [cmd, ...q], cwd: path.dirname(cmd), quickLogin: q.length > 0 || !!napcatAutoLoginAccount(settings), display: [cmd, ...q].join(' ') };
+    return { ok: true, command: cmd, args: q, cwd: path.dirname(cmd), quickLogin: q.length > 0 || !!napcatAutoLoginAccount(settings), display: [cmd, ...q].join(' ') };
   }
   return { ok: false, error: '当前系统没有内置 NapCat 启动方式：请自己启动 NapCat，接口平台照样可以连接' };
 }
@@ -103,7 +113,8 @@ export function compareNapCatVersions(a, b) {
  * macOS 上 NapCat 的文件在 QQ 的沙盒容器里，读它要过「访问其他 App 的数据」授权 —— 不为显示版本去读，改用运行中的版本。
  */
 export function napcatFileVersion(settings = {}, { platform = process.platform, read = fs.readFileSync } = {}) {
-  if (platform !== 'win32') return null;
+  // Windows 与 Linux 都按启动文件旁的 package.json 读；macOS 的 NapCat 在 QQ 沙盒容器里，不读
+  if (platform !== 'win32' && platform !== 'linux') return null;
   const cmd = String(settings.napcatCommand ?? '').trim();
   if (!cmd) return null;
   const dir = path.dirname(cmd);
@@ -137,6 +148,7 @@ export async function checkNapCatUpdate(currentVersion, { fetchImpl = globalThis
   const latest = String(rel.tag_name ?? '').replace(/^v/i, '');
   const assets = Array.isArray(rel.assets) ? rel.assets.map((a) => String(a.name ?? '')) : [];
   const mac = platform === 'darwin';
+  const linux = platform === 'linux';
   return {
     current: currentVersion ?? null,
     latest: latest || null,
@@ -146,9 +158,11 @@ export async function checkNapCatUpdate(currentVersion, { fetchImpl = globalThis
     pageUrl: mac ? NAPCAT_MAC_INSTALLER_PAGE : (rel.html_url || NAPCAT_RELEASES_PAGE),
     releaseUrl: rel.html_url || NAPCAT_RELEASES_PAGE,
     notes: String(rel.body ?? '').slice(0, 4000),
-    suggestedAsset: mac ? null : (assets.find((n) => /^NapCat\.Shell\.Windows\.OneKey\.zip$/i.test(n)) ?? assets.find((n) => /^NapCat\.Shell\.zip$/i.test(n)) ?? null),
+    suggestedAsset: mac ? null : linux ? (assets.find((n) => /^NapCat\.Shell\.zip$/i.test(n)) ?? null) : (assets.find((n) => /^NapCat\.Shell\.Windows\.OneKey\.zip$/i.test(n)) ?? assets.find((n) => /^NapCat\.Shell\.zip$/i.test(n)) ?? null),
     howTo: mac
       ? '用 NapCat Mac 安装器安装新版本（它会替换 NapCat 文件；登录态和 onebot11 配置在 QQ 容器里，不受影响）。安装前先在这里停止 NapCat，装好后再启动。'
+      : linux
+      ? '用 NapCat 官方的 Linux 安装脚本（或 Docker 镜像）更新到新版本；先在这里停止 NapCat，更新后检查 NapCat 目录里的 config/ 还在，再启动。'
       : '下载新版 NapCat.Shell，解压到一个新文件夹；先在这里停止 NapCat，把旧目录的 config/ 复制到新目录，再在「NapCat 设置」里把启动文件改成新目录里的那个。',
   };
 }
@@ -172,7 +186,9 @@ export function validateNapCatSettings(input = {}, { platform = process.platform
   if ('command' in input) {
     const v = str(input.command);
     if (v && platform === 'darwin') return { ok: false, error: 'macOS 上不需要启动文件：选择 QQ.app 即可（QQ 的入口已由 NapCat 安装器切换）' };
-    if (v && !/\.(bat|cmd|exe)$/i.test(v)) return { ok: false, error: '启动文件应是 NapCat.Shell 包里的 .bat / .cmd / .exe' };
+    if (v && platform !== 'linux' && !/\.(bat|cmd|exe)$/i.test(v)) return { ok: false, error: '启动文件应是 NapCat.Shell 包里的 .bat / .cmd / .exe' };
+    // Linux：.sh 脚本，或没有扩展名的可执行文件
+    if (v && platform === 'linux' && /\.(bat|cmd|exe)$/i.test(v)) return { ok: false, error: '这是 Windows 的启动文件：Linux 上请选择 NapCat 的 .sh 启动脚本或可执行文件' };
     if (v && !exists(v)) return { ok: false, error: `找不到启动文件：${v}` };
     patch.napcatCommand = v;
   }

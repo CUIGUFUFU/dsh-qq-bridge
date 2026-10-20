@@ -22,12 +22,12 @@
 | 项 | 值 |
 | --- | --- |
 | 项目 | qq-bridge-enhanced：QQ ↔ DeepSeek Harness（DSH）桥接，把一个 QQ 账号变成 DSH agent 驱动的「AI 群友」。基于上游 Derpyu520/qq-bridge v0.2.0-r3（已合并 r4 的修复） |
-| 操作系统 | **Windows 10/11 x64** 或 **macOS**（Apple Silicon / Intel） |
-| QQ 后端 | **Windows**：SnowLuma（推荐，完整版 `…-win-x64.zip`）或 NapCat（NapCat.Shell）；**macOS**：NapCat（用 NapCat Mac 安装器装进 Mac 版 QQ）。都由用户自行下载、安装、登录 |
+| 操作系统 | **Windows 10/11 x64**、**macOS**（Apple Silicon / Intel）或 **Linux**（x64 / arm64，桌面或无图形界面的服务器） |
+| QQ 后端 | **Windows**：SnowLuma（推荐，完整版 `…-win-x64.zip`）或 NapCat（NapCat.Shell）；**macOS**：NapCat（用 NapCat Mac 安装器装进 Mac 版 QQ）。都由用户自行下载、安装、登录；**Linux**：SnowLuma 2.x（`…-linux-x64.tar.gz` / `…-linux-arm64.tar.gz`）或 NapCat |
 | 接口平台 | 仓库里的 `interface-platform/`：桥接和 QQ 后端之间的统一接入层，由控制中心启停。桥接经它收发（「接入桥接」后） |
-| Node.js | **≥ 22.13**（推荐 22 LTS 的最新小版本） |
+| Node.js | **≥ 22.13**（推荐 22 LTS 的最新小版本）。注意 SnowLuma 2.x 的 **Lite 版需要 Node 24+**（用本机 Node 运行）；用完整版（自带 Node）就不受影响 |
 | DSH | 桌面版或命令行版，**0.2.0-rc.2 或 0.2.1**。0.2.1 桌面版每次启动用随机端口，桥接与控制中心会自动找到它 |
-| 日常启动（无窗口） | Windows：双击 `control-center-hidden.vbs`；macOS：双击本机生成的「QQ Bridge 控制中心.app」（第 10 节） |
+| 日常启动（无窗口） | Windows：双击 `control-center-hidden.vbs`；macOS：双击本机生成的「QQ Bridge 控制中心.app」（第 10 节）；Linux：`npm run linux-service` 生成 systemd 用户服务（后台常驻、登录自动启动） |
 | 端口 | 控制中心 `127.0.0.1:3099`；桥接控制台 `3100`；接口平台 `3120`；DSH 命令行版 `3080` / 桌面版 0.2.0 `19387`、0.2.1 随机（自动识别）；OneBot WS 默认 `3001`；SnowLuma WebUI `5099`；NapCat WebUI `6099` |
 
 新功能一句话：按 QQ 号跨群认人、分层人物记忆、入群感知、owner 私聊管理通道（确认码 + TOTP 的模式/权限切换、编号审批、自动回落）、
@@ -138,6 +138,16 @@ DSH 必须有可用的模型凭据，否则机器人收到消息后回复「⚠�
 
 需要向用户要的信息：**SnowLuma 解压目录**（第 10 节在页面里选择即可，不用写进配置）。
 
+### 4.1b Linux：SnowLuma（2.0 起正式支持）
+
+用户下载与机器架构匹配的**完整版** `SnowLuma-v<版本>-linux-x64.tar.gz` 或 `…-linux-arm64.tar.gz`（`uname -m` 输出 `aarch64` 就选 arm64），
+解压到项目目录之外（例如 `/opt/snowluma`）。SnowLuma 在 Linux 上接入的是本机运行的 Linux 版 QQ，需要先装好并能登录。
+第 10 节在控制中心「接入实例 → 本机 SnowLuma 程序」里选这个目录（有桌面时「浏览…」会弹出系统的选择窗口；服务器上直接填路径），
+由用户点「开启 SnowLuma」——控制中心按发行包自带的 `./launcher.sh` 运行它。第一次在 WebUI（`http://127.0.0.1:5099/`，账号 `admin`，密码见 SnowLuma 日志）
+里同意协议、扫码登录机器人 QQ、开启 OneBot WebSocket 服务端。
+- 发行包和本机不匹配（例如在 Linux 上选了 Windows 包、x64 包放到 arm64 机器上）时，控制中心不会启动，并写明需要哪个包；
+- Lite 版而本机 Node 低于 24 时同样不会启动，并提示改用完整版或升级 Node。
+
 ### 4.2 macOS：NapCat
 
 1. 用户安装 Mac 版 QQ，再用 **NapCat Mac 安装器**（https://github.com/NapNeko/NapCat-Mac-Installer/releases）安装 NapCat，
@@ -155,6 +165,13 @@ NapCat 的配置在 QQ 的沙盒容器里：`~/Library/Containers/com.tencent.qq
 
 用户下载 `NapCat.Shell.Windows.OneKey.zip`（https://github.com/NapNeko/NapCatQQ/releases）解压，按 NapCat 文档启动并扫码登录，
 在它的 WebUI 里开启 WebSocket 服务端（`127.0.0.1:3001`）。第 10 节在控制中心「NapCat 设置」里选择它的**启动文件**（.bat / .exe）和 NapCat 目录。
+
+### 4.3b Linux：NapCat（可选）
+
+按 NapCat 官方文档在 Linux 上安装（官方安装脚本或 Docker），扫码登录后在它的 WebUI 里开启 WebSocket 服务端（`127.0.0.1:3001`）。
+无图形界面的服务器上，NapCat 文档里通常是一条 `xvfb-run … qq --no-sandbox` 的启动命令：把它写进一个 `.sh` 脚本，
+在控制中心「NapCat 设置」里把**启动文件**选成这个脚本、把 **NapCat 目录**选成含 `config/onebot11_<QQ号>.json` 的目录
+（Linux 没有默认位置；不选目录时接口平台只按 `ws://127.0.0.1:3001` 无令牌连接）。也可以自己启动 NapCat，接口平台照样能连。
 
 ### 4.4 检查（后端运行并登录后）
 
@@ -342,7 +359,8 @@ node scripts/admin-totp-setup.mjs --verify <验证器上显示的6位数>
 | 系统 | 由用户双击 | 说明 |
 | --- | --- | --- |
 | Windows | `control-center-hidden.vbs` | 没有窗口，只打开浏览器页面 |
-| macOS | 「QQ Bridge 控制中心.app」 | 先在 `<BRIDGE>` 里运行一次 `npm run mac-app` 在本机生成（不入库；挪了目录或更新后重新生成）。没有窗口、没有 Dock 图标；再次双击重新打开页面 |
+| macOS | 「QQ Bridge 控制中心.app」 | 本机生成，不入库：第一次双击 `control-center.command` 时会自动生成并在访达里选中它（这一次仍在终端里运行）；也可以在 `<BRIDGE>` 里运行 `npm run mac-app`。挪了目录或更新后，删掉旧 App 再双击一次 `control-center.command`（或重跑 `npm run mac-app`）。没有窗口、没有 Dock 图标；再次双击重新打开页面 |
+| Linux | `npm run linux-service` 生成的 systemd 用户服务 | 在 `<BRIDGE>` 里运行一次 `npm run linux-service -- --enable`：写入 `~/.config/systemd/user/qq-bridge-control-center.service` 并启动；以后登录自动运行（不登录也要运行：`sudo loginctl enable-linger $USER`）。日志：`journalctl --user -u qq-bridge-control-center -f`。有桌面时还会生成「QQ Bridge 控制中心」启动项，双击打开页面。服务器上从别的电脑访问：`ssh -L 3099:127.0.0.1:3099 <服务器>` 后打开 `http://127.0.0.1:3099/#t=<state/control-center-token 的内容>` |
 
 预期：浏览器自动打开 `http://127.0.0.1:3099/`（地址里带 `#t=…` 页面令牌；令牌保存在 `state/control-center-token`）。
 **macOS**：第一次读 NapCat 配置时，系统会弹「“QQ Bridge 控制中心”想访问其他 App 的数据」，**请用户点允许**（只需一次）。
@@ -354,10 +372,10 @@ node scripts/admin-totp-setup.mjs --verify <验证器上显示的6位数>
 
 页面顶部有两个大标签「桥接」「接口平台」。进入 **接口平台 → 概览**，每个后端一张开启卡：
 
-- **Windows · SnowLuma**：先到 **接入实例 → 本机 SnowLuma 程序**，点「浏览…」选中第 4.1 节的解压目录 →「使用这个目录」；
+- **Windows / Linux · SnowLuma**：先到 **接入实例 → 本机 SnowLuma 程序**，点「浏览…」选中第 4.1 节的解压目录 →「使用这个目录」；
   回到概览，**用户点「开启 SnowLuma」**（会启动接口平台、启动 SnowLuma、在平台里建实例并连接）。
   第一次点「打开 SnowLuma WebUI」扫码登录、开启 OneBot WS 与 HTTP。
-- **macOS / Windows · NapCat**：Windows 先点 NapCat 卡片上的「管理 NapCat 程序 →」→「NapCat 设置」，选好启动文件和 NapCat 目录并保存
+- **macOS / Windows / Linux · NapCat**：Windows / Linux 先点 NapCat 卡片上的「管理 NapCat 程序 →」→「NapCat 设置」，选好启动文件和 NapCat 目录并保存
   （macOS 默认位置一般不用改）；**用户点「开启 NapCat」**（会启动接口平台、启动 NapCat、建实例并连接）。
   需要扫码时卡片上会提示「📱 NapCat 正在等你扫码登录」，点「查看登录二维码 →」用手机 QQ 扫。
 

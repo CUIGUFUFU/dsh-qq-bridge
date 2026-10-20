@@ -93,7 +93,8 @@ test('更新数据迁移：拒绝降级、拒绝同一目录、拒绝无效目�
 
 test('检查更新：只读 GitHub 的 latest release，给出该下载的完整版文件名', async () => {
   const fakeFetch = async () => ({ ok: true, json: async () => ({ tag_name: 'v1.15.0', html_url: 'https://github.com/SnowLuma/SnowLuma/releases/tag/v1.15.0', published_at: '2026-11-01T00:00:00Z', body: 'notes', assets: [{ name: 'SnowLuma-v1.15.0-win-x64-lite.zip' }, { name: 'SnowLuma-v1.15.0-win-x64.zip' }] }) });
-  const r = await checkSnowLumaUpdate('1.14.22', { fetchImpl: fakeFetch });
+  // 这个用例只有 Windows 的发行包：按 Windows 断言（Linux / 按架构的建议见 test-linux-support.mjs）
+  const r = await checkSnowLumaUpdate('1.14.22', { fetchImpl: fakeFetch, platform: 'win32', arch: 'x64' });
   assert.equal(r.updateAvailable, true);
   assert.equal(r.latest, '1.15.0');
   assert.equal(r.suggestedAsset, 'SnowLuma-v1.15.0-win-x64.zip', '推荐完整版而不是 Lite');

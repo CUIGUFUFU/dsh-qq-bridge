@@ -357,3 +357,4 @@ export { isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTemp
 export { GROUP_RULE_LIMITS, validateOwnerGroupAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, groupRuleResultText, groupRuleNoticeText } from './social/group-rules.js';
 export { OWNER_RELAY_DEFAULTS, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText } from './social/owner-relay.js';
 export { qqBackendFromVersionInfo, qqBackendLabel } from './lib/qq-backend-label.js';
+export { classifyDshError, createDshHealth } from './lib/dsh-health.js';

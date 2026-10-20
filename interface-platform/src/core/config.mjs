@@ -20,7 +20,7 @@ export function defaultDataDir() {
   return process.env.INTERFACE_PLATFORM_DATA_DIR ? path.resolve(process.env.INTERFACE_PLATFORM_DATA_DIR) : path.join(PACKAGE_ROOT, 'state');
 }
 
-/** 默认实例按操作系统选：Windows 用 SnowLuma；macOS / Linux 没有 SnowLuma，用 NapCat。 */
+/** 默认实例按操作系统选：Windows 用 SnowLuma；macOS（没有 SnowLuma）与 Linux 用 NapCat。Linux 上的 SnowLuma 在控制中心「开启 SnowLuma」时按需建实例。 */
 export function defaultConfig(os = process.platform) {
   const provider = os === 'win32' ? 'snowluma' : 'napcat';
   return {

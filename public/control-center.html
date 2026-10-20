@@ -304,9 +304,9 @@
               <button class="danger" id="snowStop" disabled>停止 SnowLuma</button>
             </div>
             <div id="snowPick" class="empty-state">
-              <p>选择你自己下载并解压的 SnowLuma 目录（含 <code>launcher.bat</code>、<code>index.mjs</code> 的那一层）。SnowLuma 不会放进项目里，也不会被自动启动。选择后会同步给接口平台的 SnowLuma 实例。</p>
+              <p>选择你自己下载并解压的 SnowLuma 目录（含 <code>launcher.bat</code>（Windows）或 <code>launcher.sh</code>（Linux）、<code>index.mjs</code> 的那一层）。SnowLuma 不会放进项目里，也不会被自动启动。选择后会同步给接口平台的 SnowLuma 实例。</p>
               <div class="row">
-                <input type="text" id="snowDirInput" placeholder="例如 D:\SnowLuma-v1.14.22-win-x64" aria-label="SnowLuma 目录">
+                <input type="text" id="snowDirInput" placeholder="例如 D:\SnowLuma-v2.0.3-win-x64 或 /opt/SnowLuma-v2.0.3-linux-x64" aria-label="SnowLuma 目录">
                 <button id="snowBrowse">浏览…</button>
                 <button class="primary" id="snowUse">使用这个目录</button>
               </div>
@@ -331,9 +331,9 @@
                 <div id="updSummary" class="note"></div>
                 <details class="notes" id="updNotesWrap" hidden><summary>更新说明</summary><pre id="updNotes"></pre></details>
                 <ol>
-                  <li>点「打开下载页」，下载 <b id="updAsset">win-x64 完整版</b>，解压到一个<b>新的</b>文件夹（不要覆盖当前目录）。</li>
+                  <li>点「打开下载页」，下载 <b id="updAsset">对应本机系统的完整版</b>，解压到一个<b>新的</b>文件夹（不要覆盖当前目录）。</li>
                   <li>回到这里，先<b>停止 SnowLuma</b>，再选择新文件夹，点「迁移数据并切换」。</li>
-                  <li>迁移会先把当前目录的 <code>config/</code>、<code>data/</code> 备份到 <code>state\snowluma-backups\</code>，再复制到新目录；旧目录原样保留，确认没问题后再自行删除。</li>
+                  <li>迁移会先把当前目录的 <code>config/</code>、<code>data/</code> 备份到 <code>state/snowluma-backups/</code>，再复制到新目录；旧目录原样保留，确认没问题后再自行删除。</li>
                 </ol>
                 <p class="note">AI 的记忆、人物库、会话在桥接的 <code>state\</code> 和 DSH 里，聊天记录在 QQ 客户端里，更新 SnowLuma 不会影响它们。控制中心只搬你的数据，不下载、不安装 SnowLuma 的程序文件。</p>
                 <div class="row">
@@ -787,10 +787,11 @@
   // 平台没运行时，控制中心读不到平台的实例（它不读平台的文件），只列出本机 SnowLuma 程序，保证仍能亲手启停 SnowLuma
   const LOCAL_SNOW = { id: '本机 SnowLuma 程序', provider: 'snowluma', providerName: 'SnowLuma（本机程序）', management: 'hosted', local: true, upstream: {}, links: [] };
   const LOCAL_NAP = { id: '本机 NapCat 程序', provider: 'napcat', providerName: 'NapCat（本机程序）', management: 'hosted', local: true, upstream: {}, links: [] };
-  // SnowLuma 只有 Windows 版：其他系统不列本机 SnowLuma 占位项。
+  // SnowLuma 有 Windows 与 Linux 版（2.0 起正式支持 Linux）：macOS 不列本机 SnowLuma 占位项。
+  const SNOW_OS = ['win32', 'linux'];
   // NapCat 程序区要始终找得到：平台没运行、或平台里还没有 NapCat 实例时，列一个「本机 NapCat 程序」占位项。
   function instancesOf(pl) {
-    const list = [...(pl.overview?.instances ?? (S?.os === 'win32' ? [LOCAL_SNOW] : []))];
+    const list = [...(pl.overview?.instances ?? (SNOW_OS.includes(S?.os) ? [LOCAL_SNOW] : []))];
     if ((S?.os === 'darwin' || S?.napcat?.info?.ok || S?.napcat?.running) && !list.some((i) => i.provider === 'napcat')) list.push(LOCAL_NAP);
     return list;
   }
@@ -823,7 +824,7 @@
     $('tRecv').textContent = up ? fmtAgo(ov.lastReceiveAt) : '—';
     $('tSend').textContent = up ? fmtAgo(ov.lastSendAt) : '—';
     $('tLink').textContent = pl.link.viaPlatform ? '经接口平台' : '直连 SnowLuma（未接入）';
-    $('plSupport').textContent = ov?.support?.note ?? 'M1：QQ 经 SnowLuma（Windows）或 NapCat（macOS / Windows）接入。自研 Mac 原生 QQ（M3）与其他平台尚未提供。';
+    $('plSupport').textContent = ov?.support?.note ?? 'M1：QQ 经 SnowLuma（Windows / Linux）或 NapCat（macOS / Windows / Linux）接入。自研 Mac 原生 QQ（M3）与其他平台尚未提供。';
 
     // 实例列表
     const insts = instancesOf(pl);
@@ -840,8 +841,8 @@
       return el('li', {}, btn);
     });
     list.replaceChildren(...items);
-    if (!insts.length) list.replaceChildren(el('li', { className: 'note', textContent: up ? '还没有实例' : (S.os === 'win32' ? '接口平台未运行' : '接口平台未运行。macOS 上 QQ 经 NapCat 接入：先自己安装并启动 NapCat（开启 WebSocket 服务端），再启动接口平台。') }));
-    $('instProvidersNote').textContent = '可用：SnowLuma（Windows）、NapCat（macOS / Windows）。尚未提供：macOS 原生 QQ 接入、Discord、KOOK、WeChat。';
+    if (!insts.length) list.replaceChildren(el('li', { className: 'note', textContent: up ? '还没有实例' : (SNOW_OS.includes(S.os) ? '接口平台未运行' : '接口平台未运行。macOS 上 QQ 经 NapCat 接入：先自己安装并启动 NapCat（开启 WebSocket 服务端），再启动接口平台。') }));
+    $('instProvidersNote').textContent = '可用：SnowLuma（Windows / Linux）、NapCat（macOS / Windows / Linux）。尚未提供：macOS 原生 QQ 接入、Discord、KOOK、WeChat。';
     renderInstDetail(insts.find((i) => i.id === selectedInst), up);
     renderAccounts(ov, up);
     renderSettings(pl, ov);
@@ -944,7 +945,9 @@
     if (hasDir) {
       const i = sl.info;
       $('snowVer').textContent = i.version + (sl.update?.latest ? (sl.update.updateAvailable ? `（有新版本 ${sl.update.latest}）` : '（已是最新）') : '');
-      $('snowEdition').textContent = i.edition === 'full' ? '完整版（自带 Node 运行时）' : 'Lite 版（使用本机 Node，需要 22.13+）';
+      // Node 要求按发行包的 engines.node 显示（2.0 起是 >=24）；平台不符、本机 Node 不够时直接写出原因
+      $('snowEdition').textContent = (i.edition === 'full' ? '完整版（自带 Node 运行时）' : `Lite 版（使用本机 Node，需要 ${i.nodeRequirement ?? '22.13+'}${i.nodeOk === false ? `，本机是 ${S.node}，不够` : ''}）`)
+        + (i.targetOk === false ? ` · ⚠️ 这是 ${i.target} 版发行包，本机需要 ${i.expectedTarget} 版` : '');
       $('snowDirText').textContent = i.dir;
       $('snowAccounts').textContent = i.accounts?.length ? i.accounts.join('、') : '还没有（首次在 SnowLuma WebUI 里扫码登录后生成）';
       $('snowWebui').textContent = i.webui.url;
@@ -967,13 +970,15 @@
     $('napQQAppRow').hidden = !mac; $('napCmdRow').hidden = mac;
     renderNapQr(n.qr);
     if (!$('napSetPanel').classList.contains('show')) $('napHomeInput').placeholder = n.home || 'NapCat 目录';
+    $('napCmdInput').placeholder = S.os === 'linux' ? 'NapCat 的 .sh 启动脚本或可执行文件' : 'NapCat.Shell 里的 .bat / .exe';
+    if (S.os === 'linux' && !n.home) $('napHomeText').textContent = '未设置（Linux 没有默认位置：在「NapCat 设置」里选 NapCat 目录，接口平台才能自动发现账号和令牌）';
     $('napNote').textContent = !n.info.ok ? n.info.error : n.external ? 'NapCat（QQ）已在别处运行，控制中心不会接管它；要在这里启停，先完全退出那个 QQ。' : (n.info.quickLogin ? '已设置自动登录（NapCat 的 autoLoginAccount 或 napcatQuickLogin）：启动时用保存的登录态，不用扫码；登录态失效时仍会要求扫码，二维码在 NapCat 的 cache/qrcode.png。' : '首次启动或登录过期时需要扫码：二维码保存在 NapCat 的 cache/qrcode.png（网页日志里的字符二维码可能扫不出来）。要免扫码，在「NapCat 设置」里填快速登录 QQ 号，或在 NapCat 里开启自动登录。');
   }
 
   // 接入后端开启卡：每个可用的提供方一张，互相独立
   const BACKENDS = [
-    { id: 'snowluma', name: 'SnowLuma', os: 'Windows' },
-    { id: 'napcat', name: 'NapCat', os: 'macOS / Windows' },
+    { id: 'snowluma', name: 'SnowLuma', os: 'Windows / Linux' },
+    { id: 'napcat', name: 'NapCat', os: 'macOS / Windows / Linux' },
   ];
   function renderBackends() {
     const pl = S.platform; const insts = pl.overview?.instances ?? []; const accs = pl.overview?.accounts ?? [];
@@ -985,7 +990,7 @@
       let prog; let progKind = ''; let unavailable = null;
       if (b.id === 'snowluma') {
         const sl = S.snowluma;
-        if (S.os !== 'win32') { prog = 'SnowLuma 只有 Windows 版，本机不能运行（可以连接别处运行的 SnowLuma）'; unavailable = true; }
+        if (!SNOW_OS.includes(S.os)) { prog = 'SnowLuma 只有 Windows / Linux 版，本机不能运行（可以连接别处运行的 SnowLuma）'; unavailable = true; }
         else if (sl.running) { prog = '运行中（控制中心启动）'; progKind = 'on'; }
         else if (S.health.snowlumaPort) { prog = '外部运行中'; progKind = 'warn'; }
         else prog = sl.info?.ok ? '未运行' : '未选择目录';
@@ -1251,7 +1256,7 @@
     $('updatePanel').classList.add('show');
     $('updTitle').textContent = u ? (u.updateAvailable ? `有新版本：${u.current} → ${u.latest}` : `当前 ${u.current}，最新 ${u.latest}`) : '更新助手';
     $('updSummary').textContent = u?.publishedAt ? `发布时间：${new Date(u.publishedAt).toLocaleString()}` : '可以先点「检查更新」。';
-    $('updAsset').textContent = u?.suggestedAsset || 'SnowLuma-v<版本>-win-x64.zip（完整版，不要选 Lite）';
+    $('updAsset').textContent = u?.suggestedAsset || (S?.os === 'linux' ? 'SnowLuma-v<版本>-linux-x64.tar.gz（arm64 机器选 linux-arm64；完整版，不要选 Lite）' : 'SnowLuma-v<版本>-win-x64.zip（完整版，不要选 Lite）');
     $('updNotesWrap').hidden = !u?.notes; $('updNotes').textContent = u?.notes || '';
   }
   $('snowUpdateHelper').onclick = () => { if ($('updatePanel').classList.contains('show')) $('updatePanel').classList.remove('show'); else showUpdate(S?.snowluma?.update); };

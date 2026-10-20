@@ -3,6 +3,36 @@
 本仓库（qq-bridge-enhanced）基于上游 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) `v0.2.0-r3`。
 上游更早的版本历史见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) 与上游 Release 页面。
 
+## v1.0.1 —— 2026-10-20
+
+在 v1.0.0 的基础上**增加 Linux 支持**（Windows、macOS 原有行为不变），适配 SnowLuma 2.x，DSH 探活更稳，macOS 第一次运行自动生成无窗口启动 App。
+发布说明：[docs/release/RELEASE_NOTES_v1.0.1.md](docs/release/RELEASE_NOTES_v1.0.1.md)。
+
+### 升级注意（从 v1.0.0）
+- 沿用 `config.json`、`state/`、`interface-platform/state/`；执行 `npm ci`，重启控制中心（桥接、接口平台随之重启）。preset 没有变化，不需要重跑 `setup-dsh.mjs`。
+- 用 SnowLuma 2.x 的 **Lite 版**需要本机 Node 24+；**完整版**自带 Node，不受影响。账号配置格式与 1.14 相同，可以用控制中心的「更新助手」把 `config/`、`data/` 迁移到新版本目录。
+- Linux：`npm run linux-service -- --enable` 生成并启动 systemd 用户服务（见部署文档 10.1）。
+
+### macOS：第一次运行自动生成无窗口启动 App
+- 第一次双击 `control-center.command` 时，如果仓库根目录还没有「QQ Bridge 控制中心.app」，会自动生成（同 `npm run mac-app`）并在访达里选中它；这一次仍在终端里运行，以后双击 App 即可。生成失败只提示、不影响启动；设 `QQ_BRIDGE_NO_MAC_APP=1` 可关闭。
+- App 仍然不入库、不进 Release 包（下载来的未签名 App 会被 macOS 拦下，本机生成的不会）。
+
+### Linux 支持（增量，Windows / macOS 行为不变）
+- **SnowLuma 2.x**（2.0 起正式支持 Linux x64 / arm64；账号配置的位置与格式与 1.14 相同，接口平台的账号发现和桥接的令牌自愈不用改）：
+  控制中心识别 Windows（`launcher.bat`、自带 `node.exe`）与 Linux（`launcher.sh`、自带 `./node`）两种发行包；Linux 用 `bash ./launcher.sh` 启动。
+  读 `package.json` 的 `engines.node`（2.x 是 `>=24`）与 `release.json` 的目标平台：Lite 版本机 Node 不够、或发行包与本机平台 / 架构不符时，不启动并写明原因。
+  检查更新按本机系统与架构建议完整版（`win-x64.zip` / `linux-x64.tar.gz` / `linux-arm64.tar.gz`）。
+- 控制中心页面：Linux 上也列「本机 SnowLuma 程序」、可「开启 SnowLuma」；Node 要求按发行包显示。
+- Linux 的「浏览…」：有 zenity 用 zenity，否则 kdialog；都没有（服务器）时手动填路径。
+- **NapCat 在 Linux**：启动文件可选 `.sh` 脚本（用 bash 运行）或可执行文件；版本从启动文件旁的 `package.json` 读；更新提示 Linux 安装方式。
+- **Linux 无窗口启动**：`npm run linux-service`（`-- --enable` 直接启用）生成 systemd 用户服务（`--no-open`、崩溃自动重启、`KillMode=mixed` 先让控制中心按顺序停子进程）与桌面启动项。
+- 新测试 `scripts/test-linux-support.mjs`（含 Windows / macOS 原有行为不变的断言）。
+
+### DSH 探活更稳：不再「失败一次就报不可用」
+- 桥接每 5 秒探活一次 DSH；现在**连续 2 次**（约 10 秒）失败才判定「DSH 不可用」并让 QQ 消息入队。DSH 很忙时偶尔一次没及时回应（例如本机满负载渲染时），不再刷出误报；偶发失败一次只在恢复时记一笔「DSH 探活偶发失败 1 次（原因），已恢复」。
+- 端口重新识别不受影响：第一次失败就开始（DSH 0.2.1 换端口后照样很快跟上）。
+- 日志写明失败次数和原因：超时 / 连接被拒（DSH 没在运行或换了端口）/ 连接被中断 / 鉴权失败 / HTTP 状态 / 其他。新模块 `src/lib/dsh-health.js`，测试 `scripts/test-dsh-health.mjs`。
+
 ## v1.0.0 —— 2026-10-19
 
 第一个正式版本：支持 **Windows 与 macOS**；新增**接口平台**（桥接经它接入 QQ 后端，可同时接 SnowLuma 与 NapCat）；

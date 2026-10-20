@@ -10,8 +10,8 @@ export const PROVIDER = {
   name: 'SnowLuma（OneBot v11）',
   available: true,
   management: ['external', 'remote'],
-  os: ['win32'],
-  note: '连接用户自己运行的 SnowLuma（只有 Windows 版）；启停 SnowLuma 进程只能由用户在控制中心亲手点击（不经接口平台）。',
+  os: ['win32', 'linux'], // 2.0 起正式支持 Linux x64 / arm64
+  note: '连接用户自己运行的 SnowLuma（Windows / Linux 版）；启停 SnowLuma 进程只能由用户在控制中心亲手点击（不经接口平台）。',
 };
 
 export const capabilities = () => oneBotCapabilities();

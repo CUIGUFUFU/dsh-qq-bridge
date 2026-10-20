@@ -3,7 +3,7 @@
 ## 离线回归（不需要 QQ、SnowLuma、DSH 或网络）
 
 ```powershell
-npm run test:audit      # 53 个脚本（v1.0.0）：原版与各版本新增的离线回归，清单见 scripts/test-audit.mjs；macOS 上 test-console-encoding 是已知失败（只适用于 Windows）
+npm run test:audit      # 55 个脚本：原版与各版本新增的离线回归，清单见 scripts/test-audit.mjs；macOS 上 test-console-encoding 是已知失败（只适用于 Windows）
 npm run test:v030       # 只跑 v0.3.0 的四个新测试
 ```
 
@@ -22,6 +22,8 @@ npm run test:v030       # 只跑 v0.3.0 的四个新测试
 | `scripts/test-napcat-manage.mjs` | NapCat 管理：系统「浏览…」窗口（macOS osascript / Windows PowerShell，参数不拼进脚本）、NapCat 版本（后端自报 / Windows 安装文件）、检查更新只读 Release 不下载、设置校验与经控制中心接口保存、页面元素 |
 | `scripts/test-qq-backend-label.mjs` | 桥接日志里 QQ 后端的称呼：经接口平台写「QQ 后端（经接口平台 · NapCat 版本）」，直连 SnowLuma 仍写 SnowLuma |
 | `scripts/test-mac-app.mjs` | macOS 无窗口启动 App 的脚本约定（后台启动、reopen、控制中心退出后 App 退出、不碰 SnowLuma/QQ）；macOS 上实际生成并校验签名 |
+| `scripts/test-dsh-health.mjs` | DSH 探活：连续 2 次失败才判定不可用；失败原因分类（用真实的 fetch「连接被拒」「超时」错误验证）；桥接接线 |
+| `scripts/test-linux-support.mjs` | Linux 支持：SnowLuma 2.x Windows / Linux 发行包识别与启动、Node 要求与平台不符时拒绝启动、按平台的更新建议、Linux「浏览…」（zenity / kdialog）、NapCat 在 Linux、systemd 用户服务；并断言 Windows / macOS 原有行为不变 |
 | `scripts/test-agent-preset-patches.mjs` | preset 源与 bundle patch 不漂移（含新 preset） |
 
 原版测试在本仓库里做过的调整（都是让测试不依赖开发机环境，没有放宽断言）：

@@ -56,7 +56,7 @@ import {
 } from './sticker-lib.js';
 // v0.3.0：人际连续性（人物库/入群事件/跨群协作）与 owner 管理通道（模式切换/权限分级/审批增强）。
 // 业务规则全部在 src/social/* 与 src/admin/*，这里只接线。
-import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, GROUP_RULE_LIMITS, validateOwnerGroupAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk, qqBackendFromVersionInfo, qqBackendLabel } from './bridge-extensions.js';
+import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, GROUP_RULE_LIMITS, validateOwnerGroupAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk, qqBackendFromVersionInfo, qqBackendLabel, createDshHealth } from './bridge-extensions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -3144,12 +3144,15 @@ async function main() {
       }
     }
   };
+  // 连续 2 次（约 10 秒）探活失败才判定「DSH 不可用」；偶发失败一次只在恢复时记一笔（src/lib/dsh-health.js）
+  const dshHealth = createDshHealth({ threshold: 2 });
   const checkDsh = async () => {
     let ok = false;
+    let lastErr = null;
     try {
       await api.settings.describe({});
       ok = true;
-    } catch {}
+    } catch (error) { lastErr = error; }
     // dsh.baseUrl 留空（自动识别）时：DSH 不可用期间每 10 秒重新识别一次地址。
     // DSH 桌面版 0.2.1 起每次启动换随机端口，只在桥接启动时识别一次的话，DSH 重启后就再也连不上。
     if (!ok && dshBaseUrlAuto && Date.now() - dshRediscoverAt > 10_000) {
@@ -3159,11 +3162,13 @@ async function main() {
         if (ep.reachable && api.setBaseUrl(ep.url)) {
           cfg.dsh.baseUrl = ep.url;
           log(`DSH 地址已变化，重新识别为 ${ep.url}${ep.discovered ? '（随机端口）' : ''}`);
-          try { await api.settings.describe({}); ok = true; } catch {}
+          try { await api.settings.describe({}); ok = true; } catch (error) { lastErr = error; }
         }
       } catch {}
     }
     if (ok) {
+      const rec = dshHealth.ok();
+      if (dshReady && rec.recoveredFrom > 0) log(`DSH 探活偶发失败 ${rec.recoveredFrom} 次（${rec.reason?.label ?? '原因未知'}），已恢复，未判定为不可用`);
       await refreshMode();
       // DSH 起来后拉一次 preset 清单；DSH 重启（dshReady 由 false 变 true）时再拉一次。
       if (!dshReady || dshPresetIds.length === 0) {
@@ -3209,9 +3214,12 @@ async function main() {
         log(`桥接模式已切换为: ${currentMode}`);
         lastMode = currentMode;
       }
-    } else if (dshReady) {
-      dshReady = false;
-      log('⚠️ DSH 不可用（重启中？），QQ 消息将入队等待');
+    } else {
+      const v = dshHealth.fail(lastErr);
+      if (dshReady && v.unavailable) {
+        dshReady = false;
+        log(`⚠️ DSH 不可用（连续 ${v.failures} 次探活失败，原因：${v.reason.label}），QQ 消息将入队等待`);
+      }
     }
   };
   let controllerInitPromise = null;
