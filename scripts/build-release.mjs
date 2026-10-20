@@ -6,13 +6,14 @@
 // 退回到「遍历目录 + 内置排除清单」。无论哪种方式，打包前都会做敏感文件检查，命中即失败：
 // config.json、state/、node_modules/、audio/、*.log、*.bak、TOTP 秘密、控制台令牌、SnowLuma 二进制等。
 //
-// 压缩用系统自带工具：Windows 10+ 的 tar.exe（bsdtar，`-a` 按扩展名生成 zip）；其它平台用 zip。
+// 压缩用 scripts/zip-utf8.mjs（只依赖 Node 自带的 zlib）：文件名带 UTF-8 标志，Windows 解压中文文件名不乱码。
 // 用法：node scripts/build-release.mjs [--out <目录>] [--include-untracked]
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createZip } from './zip-utf8.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -79,29 +80,22 @@ for (const must of ['package.json', 'package-lock.json', 'src/bridge.js', 'confi
   if (!files.includes(must)) { console.error(`❌ 打包清单缺少必需文件：${must}`); process.exit(1); }
 }
 
-const stage = path.join(outDir, name);
-fs.rmSync(stage, { recursive: true, force: true });
-fs.mkdirSync(stage, { recursive: true });
+// 用自己的 ZIP 实现打包（scripts/zip-utf8.mjs）：文件名一律带 UTF-8 标志，Windows 解压中文文件名不再乱码；
+// 也不再依赖系统的 zip / tar.exe，三个系统生成的包一致。可执行脚本（.command / .sh）固定记成 0755。
+const zip = path.join(outDir, `${name}.zip`);
+fs.rmSync(zip, { force: true });
+const entries = [];
 for (const rel of files) {
   const src = path.join(root, rel);
   if (!fs.existsSync(src)) continue; // 已删除但未提交
-  const dest = path.join(stage, rel);
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
+  const st = fs.statSync(src);
+  if (!st.isFile()) continue;
+  const exec = /\.(command|sh)$/i.test(rel) || (process.platform !== 'win32' && (st.mode & 0o111));
+  entries.push({ name: `${name}/${rel.split(path.sep).join('/')}`, data: fs.readFileSync(src), mtime: st.mtime, mode: exec ? 0o100755 : 0o100644 });
 }
-
-const zip = path.join(outDir, `${name}.zip`);
-fs.rmSync(zip, { force: true });
-// Windows：显式用系统自带的 bsdtar（Git Bash / MSYS 里的 GNU tar 不支持 -a 生成 zip，且会把 "D:" 当成远程主机）；
-// 压缩包路径用相对名，避免盘符被误解析。
-const winTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-const r = process.platform === 'win32'
-  ? spawnSync(winTar, ['-a', '-c', '-f', `${name}.zip`, name], { cwd: outDir, stdio: 'inherit' })
-  : spawnSync('zip', ['-qr', zip, name], { cwd: outDir, stdio: 'inherit' });
-if (r.status !== 0) { console.error('❌ 压缩失败（Windows 需要系统自带的 tar.exe；其它平台需要 zip）'); process.exit(1); }
+fs.writeFileSync(zip, createZip(entries));
 
 const hash = crypto.createHash('sha256').update(fs.readFileSync(zip)).digest('hex');
 fs.writeFileSync(`${zip}.sha256`, `${hash}  ${name}.zip\n`);
-fs.rmSync(stage, { recursive: true, force: true });
 console.log(`✅ ${path.relative(root, zip)}（${files.length} 个文件，来源：${source}）`);
 console.log(`   SHA-256 ${hash}`);

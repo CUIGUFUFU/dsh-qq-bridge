@@ -146,6 +146,48 @@ export function snowlumaLaunchSpec(info, { platform = process.platform, nodeVers
   return { command: node, args: ['./index.mjs'], cwd: info.dir, display: `${node} ./index.mjs（${info.dir}）` };
 }
 
+/**
+ * 一个 SnowLuma 目录里有哪些用户数据（只看文件是否存在，不读内容）：
+ *   accounts：config/onebot_<QQ号>.json 里的 QQ 号；webui：config/webui.json（WebUI 登录密码）；data：data/ 里有没有东西。
+ */
+export function snowlumaDataSummary(dir) {
+  const d = path.resolve(String(dir ?? ''));
+  let accounts = [];
+  try { accounts = fs.readdirSync(path.join(d, 'config')).map((n) => /^onebot_(\d+)\.json$/.exec(n)?.[1]).filter(Boolean); } catch {}
+  let data = false;
+  try { data = fs.readdirSync(path.join(d, 'data')).length > 0; } catch {}
+  return { accounts, webui: fs.existsSync(path.join(d, 'config', 'webui.json')), data };
+}
+
+/**
+ * 换到新的 SnowLuma 目录前要不要提醒「先迁移数据」：旧目录有账号配置或 WebUI 密码，而新目录两样都没有。
+ * 直接换过去的后果：SnowLuma 当成全新安装 —— 生成新的随机 WebUI 密码（旧密码失效）、要重新扫码登录、
+ * 重新开 OneBot WebSocket，接口平台也找不到原来的账号。返回 null（不用提醒）或 { oldDir, newDir, old, new, text }。
+ */
+export function migrationWarning({ oldDir, newDir }) {
+  if (!oldDir || !newDir) return null;
+  const a = path.resolve(String(oldDir));
+  const b = path.resolve(String(newDir));
+  if (a.toLowerCase() === b.toLowerCase() || !fs.existsSync(a)) return null;
+  const old = snowlumaDataSummary(a);
+  const neu = snowlumaDataSummary(b);
+  const oldHas = old.accounts.length > 0 || old.webui;
+  const newHas = neu.accounts.length > 0 || neu.webui;
+  if (!oldHas || newHas) return null;
+  const items = [
+    old.accounts.length ? `${old.accounts.length} 个账号的 OneBot 配置` : null,
+    old.webui ? 'WebUI 登录密码' : null,
+    old.data ? '运行数据（data/）' : null,
+  ].filter(Boolean).join('、');
+  return {
+    oldDir: a,
+    newDir: b,
+    old,
+    new: neu,
+    text: `新目录里还没有你的数据，旧目录里有：${items}。直接切换的话，SnowLuma 会当成全新安装：生成新的随机 WebUI 密码（浏览器里保存的旧密码会失效）、要重新扫码登录、重新开启 OneBot WebSocket，接口平台也找不到原来的账号。建议先用「更新助手」把旧目录的 config/、data/ 迁移过去（会先备份，旧目录原样保留）。`,
+  };
+}
+
 /** 查询最新 Release（只读）。 */
 export async function checkSnowLumaUpdate(currentVersion, { fetchImpl = globalThis.fetch, timeoutMs = 10000, platform = process.platform, arch = process.arch } = {}) {
   const res = await fetchImpl(SNOWLUMA_RELEASES_API, {

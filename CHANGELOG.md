@@ -3,7 +3,65 @@
 本仓库（qq-bridge-enhanced）基于上游 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) `v0.2.0-r3`。
 上游更早的版本历史见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) 与上游 Release 页面。
 
-## v1.0.1 —— 2026-10-20
+## v1.0.2 —— 2026-10-20
+
+在 v1.0.1 的基础上：换 SnowLuma 目录（例如升级到 2.x）时，新目录缺数据会先提醒迁移；补充 SnowLuma WebUI 登录相关的常见问题；
+修复 Windows 实机部署 v1.0.1 时发现的问题（Release ZIP 中文文件名乱码、重置会话清不掉等待租约等）；黑话研究未确认的 AI 推测显示在控制台；控制台可以选择 DSH 的提供方 / 模型 / 思考强度（GitHub issue #1）。
+发布说明：[docs/release/RELEASE_NOTES_v1.0.2.md](docs/release/RELEASE_NOTES_v1.0.2.md)。
+
+### 控制台选择 DSH 模型（提供方 / 模型 / 思考强度），保存即生效（GitHub issue #1）
+- 「DSH 模型与思考强度」卡片改为提供方、模型、思考强度三个联动下拉，外加「看图能力」。选项全部来自 DSH 的模型目录（`session.modelCatalog`），不另维护清单，
+  在 DSH 里配好的其它提供方桥接也能用；目录读不到时只显示当前配置和内置档位，并标注「目录不可用」。保存后对已有会话的下一条消息生效，不用重启桥接。
+- 默认值不变：`deepseek-official` / `deepseek-flash` / `max`（DSH 桌面版 0.2.1 的 `deepseek-account` 同样按 DeepSeek 自家处理）。
+- 服务端硬校验：提供方 / 模型不在目录里 → 400；档位不在该模型公布的列表里 → 400（附上支持的档位）；目录读不到 → 503 且不写 `config.json`。
+  无档位的模型强度下拉置灰，`selectModel` 不带 `reasoningEffort`；配置里的档位该模型不支持时交给模型默认并记一条日志。
+- **`off` 档放开**：档位以目录为准，选「关闭思考」时提示二代仿真的工具调用、读群判断和人格一致性可能变差。
+- **不能看图的模型自动把图片改成文字**：目录不公布 `inputModalities`，所以看图能力用「已知表 + 未知」表达（`dsh.vision`：`auto` / `yes` / `no`）。
+  `auto` 下只有核实过的 `deepseek-flash` 收图；其它模型的聊天图片、表情改成「[图片1：当前模型 … 不能看图，已省略]」（不下载图片），
+  工具查询图片只返回文字，表情图 / 形象图对 AI 拒绝返回——避免整条消息报 `UNSUPPORTED_CONTENT` / `MODEL_DOES_NOT_SUPPORT_IMAGES`。
+- **第三方提供方提示隐私**：选中非 DeepSeek 自家的提供方时提示「QQ 聊天内容会发给它处理」，第一次保存前再确认一次。
+- 价格表只覆盖 DeepSeek 自家价目：其它模型（含第三方的同名模型）在下拉里标「价格未覆盖」，花费按 Flash 估算并标「估算」。
+- 安全：`POST /api/dsh/model` 只有控制台能调（agent token 白名单本来就不含 `/api/dsh/*`），QQ 里的 AI 和私聊管理通道都改不了模型。
+- 实现：新模块 `src/dsh-model.js`（目录 60 秒缓存与并发去重、校验、selectModel 参数、看图判断、提示文案、图片降级），`bridge.js` 只做接线；旧接口 `POST /api/dsh/effort` 保留并同样按目录校验。
+- 新测试 `scripts/test-dsh-model.mjs`（模块 + 桥接接口端到端 + 图片降级）；`test-audit-bridge` 的 agent token 拒绝清单加上 `POST /api/dsh/model`；控制台离线夹具与 `test-console-ui` 改为新流程（夹具里的第三方提供方是虚构的）。
+- 文档：`CONFIGURATION.md` 新增模型选择一节；`DSH_020_ADAPTATION.md` 更新 `off` 档与桌面版提供方名的说明。
+
+### 黑话研究：未确认的 AI 推测显示在控制台
+- 词条新增 `lastGuess`（`{ meaning, usage, example, at }`）：研究结果未确认时保存 AI 的推测，只给控制台看。旧词库没有这个字段，读入为 `null`，不需要迁移。
+- 控制台「候选词-待研究」卡片显示「AI 推测（未确认，时间）」与「采用为含义」按钮：只把推测填进编辑框的空栏位，保存仍由管理员点，保存后词条仍是候选（移到「已研究」）。
+- 安全：推测不写 meaning / usage / example，不算「已研究」，不能凭它确认；`buildSlangContext` 与给 AI 的 `publicSlangEntry` 都是字段白名单，不含 `lastGuess`；`GET /api/slang` 本来就拒绝 agent token；接口不接受外部写入 `lastGuess`；重新研究时也不把上次的推测喂回去。
+- 研究确认、管理员填了含义、单条 / 批量确认时清空；再次研究仍未确认时覆盖为最新推测（没给推测则保留上一次）。
+- 新测试 `scripts/test-slang-guess.mjs`；控制台离线夹具加一条带推测的演示候选。
+
+### 修复（来自 Windows 实机部署 v1.0.1 的反馈）
+- **Release ZIP 中文文件名在 Windows 上乱码、解压失败**（`roles/小鲸鱼.md`、`roles/傲娇助手.md`、`assets/deepseek娘.png`）：macOS 自带的 zip 不设「文件名是 UTF-8」标志，
+  Windows 的解压按旧代码页解读。发布脚本改用自己的 ZIP 实现（`scripts/zip-utf8.mjs`，只依赖 Node 自带的 zlib）：每个条目都带 UTF-8 标志，`.command` / `.sh` 保留可执行位，
+  三个系统生成的包一致，不再依赖系统的 zip / tar。v1.0.0、v1.0.1 的包都有这个问题。
+- **黑话研究日志口径**：以前打印「已更新 N 条」用的是解析到的条数，未确认（不写库）的也算进去，管理端以为研究成功、词库却没变。
+  现在分别报「写入 / 解析 / 未确认」，未确认的仍不写库，但把 AI 的推测（前 120 字）写进日志，方便判断该手填还是换关键词重研。
+- **重置会话清不掉 `qq_wait_for_messages` 的等待租约**：控制台 / 控制中心的「重置会话」、QQ 里的 `/reset`、二代仿真全量重置都漏了清租约，
+  新会话被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。现在三处都调用完整清理，归一后的会话 key 也一并清。
+- **接口平台里默认生成的 SnowLuma 实例标红**（从 v0.4.x 升级时平台第一次启动，`snowluma-main` 既没有目录也没有令牌）：控制中心知道 SnowLuma 目录时自动替它补上，
+  连接器按账号读令牌；用户自己配过令牌的实例不动。
+- **两个测试在 Windows 上失败**：接口平台测试用 `URL.pathname` 当路径（Windows 上是 `/C:/…`）；生成 Linux 服务文件时用了平台相关的 `path.join`（Windows 上变成反斜杠）。
+  都改为 `fileURLToPath` / `path.posix`，另外两处同样写法一并修正，并加回归测试禁止再用 `URL.pathname` 当路径。
+- 部署文档：第 13 节补「换目录后必做」清单（先重置会话再删旧目录、重启 MCP、工具开关改后重置会话、带上 `interface-platform/state/`、SnowLuma 换目录走更新助手、不要双击旧目录的启动器），常见错误补四条。
+- 新测试 `scripts/test-deploy-fixes.mjs`，`test-platform.mjs` 加 ⑧（自动补 SnowLuma 目录）。
+- 测试夹具 `audit-bridge-harness.mjs` 的临时目录先取 realpath：macOS 默认临时目录是软链接，`test-audit-bridge` / `test-voice` 的语音库路径断言在真实 Mac 上会失败（只改测试，语音库的 symlink 防护不变）。
+
+### 升级注意（从 v1.0.1）
+- 沿用 `config.json`、`state/`、`interface-platform/state/`；执行 `npm ci`，重启控制中心。没有数据格式变化，不需要重跑 `setup-dsh.mjs`。
+
+### 换 SnowLuma 目录前提醒迁移数据
+- 在控制中心换到新的 SnowLuma 目录时，如果新目录里既没有账号配置（`config/onebot_<QQ号>.json`）也没有 WebUI 密码（`config/webui.json`），而旧目录有，**先不切换**，提醒用「更新助手」迁移：
+  直接换过去 SnowLuma 会当成全新安装——生成新的随机 WebUI 密码（浏览器里保存的旧密码失效）、要重新扫码登录、重新开 OneBot WebSocket。确认框里点「去迁移（推荐）」会打开更新助手并填好新目录；坚持不迁移要再确认一次才切换。
+- 背景：SnowLuma 1.14 与 2.x 的 `webui.json` 格式、密码规则完全相同，升级本身不会让密码失效；失效通常是新目录没带上旧的 `config/`（或旧版从没改过初始密码，每次启动都会重新生成）。
+
+### 文档：SnowLuma WebUI 登录的常见问题
+- 部署文档「常见错误」补三条：升级后旧密码登录不了（新目录没带上 `config/`，或初始密码从没改过）；
+  输对密码也登不进、提示「登录尝试过多」（SnowLuma 同一地址 5 次输错锁 15 分钟，锁定期间正确密码也被拒，重启 SnowLuma 或等 15 分钟即解除；`localhost` 与 `127.0.0.1` 分开计数）；
+  改密码提示「新密码不得与旧密码相同」（说明填的当前密码就是现在存着的密码，直接用它登录）。
+
 
 在 v1.0.0 的基础上**增加 Linux 支持**（Windows、macOS 原有行为不变），适配 SnowLuma 2.x，DSH 探活更稳，macOS 第一次运行自动生成无窗口启动 App。
 发布说明：[docs/release/RELEASE_NOTES_v1.0.1.md](docs/release/RELEASE_NOTES_v1.0.1.md)。

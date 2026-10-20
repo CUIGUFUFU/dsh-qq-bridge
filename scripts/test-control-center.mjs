@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { inspectSnowLumaDir, compareVersions, migrateSnowLumaData, checkSnowLumaUpdate, snowlumaLaunchSpec } from '../src/launcher/snowluma-install.mjs';
+import { inspectSnowLumaDir, compareVersions, migrateSnowLumaData, checkSnowLumaUpdate, snowlumaLaunchSpec, migrationWarning, snowlumaDataSummary } from '../src/launcher/snowluma-install.mjs';
 import { createManagedProcess } from '../src/launcher/managed-process.mjs';
 import { startControlCenter } from '../src/launcher/control-center.mjs';
 // 不碰真实 NapCat 目录（macOS 上读 QQ 沙盒容器会弹授权窗并卡住测试）
@@ -318,4 +318,67 @@ test('NapCat 自动登录设置：读 webui.json 的 autoLoginAccount，结果�
   assert.equal(reads, 1, '10 分钟内只读一次');
   assert.equal(napcatAutoLoginAccount({ napcatHome: home }, { now: 11 * 60_000, read: () => { reads += 1; throw Object.assign(new Error('x'), { code: 'EPERM' }); } }), '', '读不了就当没设置');
   assert.equal(reads, 2);
+});
+
+test('换 SnowLuma 目录前的迁移提醒：旧目录有账号配置或 WebUI 密码、新目录两样都没有时才提醒', () => {
+  const d = tmp();
+  const old = fakeSnowLuma(path.join(d, 'old'), '1.14.22', { files: { 'config/onebot_10001.json': '{}', 'config/webui.json': '{}', 'data/10001/x': 'x' } });
+  const fresh = fakeSnowLuma(path.join(d, 'new'), '2.0.3');
+  assert.deepEqual(snowlumaDataSummary(old), { accounts: ['10001'], webui: true, data: true });
+  assert.deepEqual(snowlumaDataSummary(fresh), { accounts: [], webui: false, data: false });
+  const w = migrationWarning({ oldDir: old, newDir: fresh });
+  assert.ok(w, '新目录是空的：要提醒');
+  assert.match(w.text, /1 个账号的 OneBot 配置、WebUI 登录密码、运行数据/);
+  assert.match(w.text, /更新助手/);
+  assert.equal(migrationWarning({ oldDir: old, newDir: old }), null, '同一个目录不提醒');
+  assert.equal(migrationWarning({ oldDir: '', newDir: fresh }), null, '第一次选目录不提醒');
+  assert.equal(migrationWarning({ oldDir: path.join(d, 'gone'), newDir: fresh }), null, '旧目录已不存在不提醒');
+  const emptyOld = fakeSnowLuma(path.join(d, 'emptyOld'), '1.14.22');
+  assert.equal(migrationWarning({ oldDir: emptyOld, newDir: fresh }), null, '旧目录本来就没数据不提醒');
+  const migrated = fakeSnowLuma(path.join(d, 'migrated'), '2.0.3', { files: { 'config/webui.json': '{}' } });
+  assert.equal(migrationWarning({ oldDir: old, newDir: migrated }), null, '新目录已经有 WebUI 密码（已迁移过）不提醒');
+  const onlyWebui = fakeSnowLuma(path.join(d, 'onlyWebui'), '1.14.22', { files: { 'config/webui.json': '{}' } });
+  assert.ok(migrationWarning({ oldDir: onlyWebui, newDir: fresh }), '旧目录只有密码也要提醒');
+});
+
+test('控制中心：选择缺数据的新目录时先不切换、返回迁移提醒；确认「仍然切换」（force）后才切换；迁移后数据带着 WebUI 密码过去', async () => {
+  const d = tmp();
+  fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ version: '9.9.9-test' }));
+  fs.mkdirSync(path.join(d, 'node_modules'));
+  const old = fakeSnowLuma(path.join(d, 'sl-old'), '1.14.22', { files: { 'config/onebot_10001.json': '{}', 'config/webui.json': '{"passwordHash":"fake"}' } });
+  const fresh = fakeSnowLuma(path.join(d, 'sl-new'), '2.0.3');
+  fs.mkdirSync(path.join(d, 'state'), { recursive: true });
+  fs.writeFileSync(path.join(d, 'state', 'control-center.json'), JSON.stringify({ snowlumaDir: old }));
+  const cc = await startControlCenter({ open: false, port: 0, root: d, bridgeEntry: path.join(d, 'nope.mjs'), installSignalHandlers: false, exitOnShutdown: false, log: () => {} });
+  const T = { 'x-control-token': cc.token };
+  const saved = () => JSON.parse(fs.readFileSync(path.join(d, 'state', 'control-center.json'), 'utf8')).snowlumaDir;
+  try {
+    const r1 = await req(cc.port, 'POST', '/api/snowluma/select', { body: { dir: fresh }, headers: T });
+    assert.equal(r1.status, 200);
+    assert.equal(r1.body.needMigrate, true);
+    assert.equal(r1.body.switched, false);
+    assert.match(r1.body.warning, /新的随机 WebUI 密码/);
+    assert.equal(path.resolve(saved()), path.resolve(old), '提醒时不切换');
+    const mig = await req(cc.port, 'POST', '/api/snowluma/migrate', { body: { toDir: fresh }, headers: T });
+    assert.equal(mig.body.ok, true, JSON.stringify(mig.body));
+    assert.equal(fs.readFileSync(path.join(fresh, 'config', 'webui.json'), 'utf8'), '{"passwordHash":"fake"}', '迁移把 WebUI 密码一起带过去');
+    assert.equal(path.resolve(saved()), path.resolve(fresh), '迁移后切到新目录');
+    const another = fakeSnowLuma(path.join(d, 'sl-another'), '2.0.3');
+    const r2 = await req(cc.port, 'POST', '/api/snowluma/select', { body: { dir: another }, headers: T });
+    assert.equal(r2.body.needMigrate, true);
+    const r3 = await req(cc.port, 'POST', '/api/snowluma/select', { body: { dir: another, force: true }, headers: T });
+    assert.equal(r3.body.switched, true, '确认后照样可以直接切换');
+    assert.equal(path.resolve(saved()), path.resolve(another));
+  } finally { await cc.shutdown('test'); }
+});
+
+test('页面：选择目录收到迁移提醒时，先建议「去迁移」（填好新目录、打开更新助手），不迁移要再确认一次才带 force 切换', () => {
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const fn = html.slice(html.indexOf("$('snowUse').onclick"), html.indexOf("$('snowChange').onclick"));
+  assert.match(fn, /if \(r\?\.needMigrate\)/);
+  assert.match(fn, /'去迁移（推荐）'/);
+  assert.match(fn, /\$\('migrateDir'\)\.value = r\.newDir/);
+  assert.match(fn, /'仍然切换'/);
+  assert.match(fn, /\{ dir, force: true \}/);
+  assert.ok(fn.indexOf("'仍然切换'") < fn.indexOf('force: true'), '先确认再强制切换');
 });

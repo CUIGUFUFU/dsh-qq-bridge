@@ -533,25 +533,40 @@ try {
     await page.waitForFunction(() => document.getElementById('roleInjectMaxMsg').textContent.includes('6000'));
   });
 
-  if (!original) await test('思考强度：档位来自 DSH、默认 max、可切换并明示全局副作用', async () => {
+  if (!original) await test('DSH 模型：提供方 / 模型 / 思考强度联动、来自目录、明示全局副作用与第三方隐私', async () => {
     await navigate('overview');
     await page.waitForFunction(() => document.getElementById('dshEffortSelect').options.length > 0);
-    const options = await page.locator('#dshEffortSelect option').evaluateAll((nodes) => nodes.map((n) => n.value));
-    assert.deepEqual(options, ['low', 'high', 'max'], `档位应来自 DSH 公布的能力，实际 ${options.join(',')}`);
+    const efforts = async () => page.locator('#dshEffortSelect option').evaluateAll((nodes) => nodes.map((n) => n.value));
+    assert.deepEqual(await efforts(), ['off', 'low', 'high', 'max'], `档位应来自 DSH 目录，实际 ${(await efforts()).join(',')}`);
     assert.equal(await page.locator('#dshEffortSelect').inputValue(), 'max', '默认应为 max');
     assert.match(await page.locator('#dshEffortSideEffect').textContent(), /全局默认/, '必须说明会连带改 DSH 全局默认');
-    await page.locator('#dshEffortSelect').selectOption('high');
+    // 选 off：提示可能影响质量
+    await page.locator('#dshEffortSelect').selectOption('off');
+    assert.match(await page.locator('#dshModelNotices').textContent(), /思考已关闭/);
+    // 换到第三方提供方：模型联动、无档位模型置灰、提示隐私和价格未覆盖、看图未知
+    await page.locator('#dshProviderSelect').selectOption('example-cloud');
+    assert.equal(await page.locator('#dshModelSelect').inputValue(), 'example-chat');
+    assert.equal(await page.locator('#dshEffortSelect').isDisabled(), true, '无档位模型的强度下拉置灰');
+    const notices = await page.locator('#dshModelNotices').textContent();
+    assert.match(notices, /不是 DeepSeek 自家的提供方/);
+    assert.match(notices, /价格表没有覆盖/);
+    assert.match(notices, /能不能看图未知/);
+    await page.locator('#dshModelSelect').selectOption('example-reasoner');
+    assert.deepEqual(await efforts(), ['minimal', 'medium', 'xhigh'], '档位跟着模型变');
+    page.once('dialog', (d) => d.accept());
     const [saved] = await Promise.all([
-      page.waitForResponse(r => new URL(r.url()).pathname === '/api/dsh/effort' && r.request().method() === 'POST'),
+      page.waitForResponse(r => new URL(r.url()).pathname === '/api/dsh/model' && r.request().method() === 'POST'),
       page.locator('#dshEffortSave').click(),
     ]);
     assert.equal(saved.status(), 200);
-    assert.equal((await saved.json()).reasoningEffort, 'high');
-    assert.match(await page.locator('#dshEffortMsg').textContent(), /high/);
+    assert.deepEqual(saved.request().postDataJSON(), { provider: 'example-cloud', model: 'example-reasoner', reasoningEffort: 'medium', vision: 'auto' });
+    await page.waitForFunction(() => document.getElementById('dshEffortMsg').textContent.includes('example-reasoner'));
     // 改回默认，避免影响后续断言
+    await page.locator('#dshProviderSelect').selectOption('deepseek-official');
+    await page.locator('#dshModelSelect').selectOption('deepseek-flash');
     await page.locator('#dshEffortSelect').selectOption('max');
     await page.locator('#dshEffortSave').click();
-    await page.waitForFunction(() => document.getElementById('dshEffortSelect').value === 'max');
+    await page.waitForFunction(() => document.getElementById('dshProviderText').textContent === 'deepseek-official' && document.getElementById('dshEffortSelect').value === 'max');
   });
 
   if (artifacts) {

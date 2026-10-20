@@ -27,7 +27,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createManagedProcess } from './managed-process.mjs';
-import { inspectSnowLumaDir, snowlumaLaunchSpec, checkSnowLumaUpdate, migrateSnowLumaData, pickFolderDialog, SNOWLUMA_RELEASES_PAGE } from './snowluma-install.mjs';
+import { inspectSnowLumaDir, snowlumaLaunchSpec, checkSnowLumaUpdate, migrateSnowLumaData, pickFolderDialog, migrationWarning, SNOWLUMA_RELEASES_PAGE } from './snowluma-install.mjs';
 import { redactCredentials, redactKnown } from '../lib/redact.mjs';
 import { inspectNapCat, napcatLaunchSpec, napcatDefaultHome, NAPCAT_DEFAULT_WEBUI_PORT, napcatFileVersion, napcatRuntimeVersion, checkNapCatUpdate, validateNapCatSettings, NAPCAT_RELEASES_PAGE, NAPCAT_MAC_INSTALLER_PAGE, napcatQrStatus, readNapCatQr, napcatLoggedIn } from './napcat-launch.mjs';
 import { pickDialog } from './pick-dialog.mjs';
@@ -293,7 +293,25 @@ export async function startControlCenter({ open = true, port: portOverride = nul
     if (out.reachable) {
       try { out.overview = await platformApi('/v1/admin/overview', { timeoutMs: 1500 }); delete out.overview.ok; } catch (e) { out.overviewError = String(e?.message ?? e); }
     }
+    await autoFillSnowLumaHome(out.overview);
     return out;
+  }
+
+  // 平台里默认生成的 SnowLuma 实例（例如从 v0.4.x 升级、平台第一次启动时建的 snowluma-main）既没有目录也没有令牌，
+  // 连不上、在页面上标红。控制中心已经知道 SnowLuma 目录时，替它补上目录，让连接器按账号自己读令牌。
+  // 只补「完全没配置」的实例（目录为空且没有令牌）：用户自己填了 WS 地址 + 令牌的实例不动。每个实例只自动补一次。
+  const autoFilledHome = new Set();
+  async function autoFillSnowLumaHome(ov) {
+    if (!ov || !snowInfo.ok) return;
+    const inst = (ov.instances ?? []).find((i) => i.provider === 'snowluma' && !i.upstream?.homeDir && !i.upstream?.hasToken);
+    if (!inst || autoFilledHome.has(inst.id)) return;
+    autoFilledHome.add(inst.id);
+    try {
+      await platformApi(`/v1/admin/instances/${inst.id}`, { method: 'POST', body: { upstream: { homeDir: snowInfo.dir } } });
+      platform.note(`接口平台的 ${inst.id} 实例没有配置 SnowLuma 目录和令牌：已自动补上目录 ${snowInfo.dir}（连接器会按账号读取令牌）`);
+    } catch (e) {
+      platform.note(`给接口平台的 ${inst.id} 实例补 SnowLuma 目录失败：${e?.message ?? e}`);
+    }
   }
 
   /** 把后端目录同步给平台里该提供方的实例 —— 只经管理接口；平台没运行就不同步（返回 false，页面会提示）。 */
@@ -705,6 +723,9 @@ export async function startControlCenter({ open = true, port: portOverride = nul
         if (snowluma.running) return send(409, { ok: false, error: '请先停止 SnowLuma 再更换目录' });
         const info = inspectSnowLumaDir(body.dir);
         if (!info.ok) return send(400, { ok: false, error: info.error });
+        // 新目录缺账号配置和 WebUI 密码、旧目录却有：先不切换，提醒用「更新助手」迁移（用户确认「仍然切换」时带 force: true）
+        const warn = body.force === true ? null : migrationWarning({ oldDir: settings.snowlumaDir, newDir: info.dir });
+        if (warn) return send(200, { ok: true, switched: false, needMigrate: true, warning: warn.text, oldDir: warn.oldDir, newDir: warn.newDir, old: warn.old, info });
         settings.snowlumaDir = info.dir;
         saveSettings(settings);
         snowInfo = info;
@@ -722,7 +743,7 @@ export async function startControlCenter({ open = true, port: portOverride = nul
           } catch {}
         }
         snowluma.note(`已选择 SnowLuma 目录：${info.dir}（${info.version}，${info.edition === 'full' ? '完整版' : 'Lite 版'}）${homeDirSynced ? '；已同步 config.json 的 snowluma.homeDir（重启桥接后生效）' : ''}${platformSynced ? '；已同步给接口平台的 SnowLuma 实例' : ''}`);
-        return send(200, { ok: true, info, homeDirSynced, platformSynced });
+        return send(200, { ok: true, switched: true, info, homeDirSynced, platformSynced });
       }
       if (req.method === 'POST' && p === '/api/snowluma/start') {
         if (!snowluma.running && snowInfo.ok && await portOpen(snowInfo.webui.port)) {

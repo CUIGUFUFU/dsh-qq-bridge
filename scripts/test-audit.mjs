@@ -105,6 +105,10 @@ const tests = [
   'test-dsh-health.mjs',
   // Linux 支持（增量，Windows / macOS 行为不变）：SnowLuma 2.x 发行包识别与启动、Node 要求、按平台的更新建议、Linux「浏览…」、NapCat 在 Linux、systemd 用户服务。
   'test-linux-support.mjs',
+  // Windows 实机部署反馈的问题：Release ZIP 中文文件名 UTF-8 标志、黑话研究日志计数、会话重置清等待租约、Linux 服务文件 POSIX 路径、禁止 URL.pathname 当路径。
+  'test-deploy-fixes.mjs',
+  'test-slang-guess.mjs',
+  'test-dsh-model.mjs',
   // AI 收藏表情的后端适配：SnowLuma 照旧 base64://；NapCat 只收本地路径时改用桥接自建的受控临时文件（用完即删）。
   'test-sticker-collect.mjs',
 ];

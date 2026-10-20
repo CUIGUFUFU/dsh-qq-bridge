@@ -3,7 +3,7 @@
 ## 离线回归（不需要 QQ、SnowLuma、DSH 或网络）
 
 ```powershell
-npm run test:audit      # 55 个脚本：原版与各版本新增的离线回归，清单见 scripts/test-audit.mjs；macOS 上 test-console-encoding 是已知失败（只适用于 Windows）
+npm run test:audit      # 58 个脚本：原版与各版本新增的离线回归，清单见 scripts/test-audit.mjs；macOS 上 test-console-encoding 是已知失败（只适用于 Windows）
 npm run test:v030       # 只跑 v0.3.0 的四个新测试
 ```
 
@@ -24,6 +24,9 @@ npm run test:v030       # 只跑 v0.3.0 的四个新测试
 | `scripts/test-mac-app.mjs` | macOS 无窗口启动 App 的脚本约定（后台启动、reopen、控制中心退出后 App 退出、不碰 SnowLuma/QQ）；macOS 上实际生成并校验签名 |
 | `scripts/test-dsh-health.mjs` | DSH 探活：连续 2 次失败才判定不可用；失败原因分类（用真实的 fetch「连接被拒」「超时」错误验证）；桥接接线 |
 | `scripts/test-linux-support.mjs` | Linux 支持：SnowLuma 2.x Windows / Linux 发行包识别与启动、Node 要求与平台不符时拒绝启动、按平台的更新建议、Linux「浏览…」（zenity / kdialog）、NapCat 在 Linux、systemd 用户服务；并断言 Windows / macOS 原有行为不变 |
+| `scripts/test-deploy-fixes.mjs` | Windows 实机部署反馈的回归：ZIP 中文文件名 UTF-8 标志与可执行位、黑话研究日志计数、会话重置清等待租约、Linux 服务文件 POSIX 路径、禁止用 `URL.pathname` 当文件路径 |
+| `scripts/test-slang-guess.mjs` | 黑话研究未确认时的 AI 推测（`lastGuess`）：字段清洗与限长、不进提示词、不进给 AI 的公开条目、确认 / 填含义后清空、控制台只在「待研究」显示并转义、「采用为含义」只填编辑框 |
+| `scripts/test-dsh-model.mjs` | 控制台选择 DSH 模型：档位规范化与目录硬校验、selectModel 参数（无档位不带字段）、目录缓存、看图能力与图片降级成文字、第三方 / 价格 / off 提示；桥接接口写 config.json 并热生效、目录不可用拒绝保存、AI 令牌拒绝 |
 | `scripts/test-agent-preset-patches.mjs` | preset 源与 bundle patch 不漂移（含新 preset） |
 
 原版测试在本仓库里做过的调整（都是让测试不依赖开发机环境，没有放宽断言）：

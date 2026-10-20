@@ -273,3 +273,51 @@ test('⑥ 开启卡：NapCat 与 SnowLuma 各自开启/关闭、可同时开启�
     if (prevData === undefined) delete process.env.INTERFACE_PLATFORM_DATA_DIR; else process.env.INTERFACE_PLATFORM_DATA_DIR = prevData;
   }
 });
+
+test('⑧ 平台里默认生成的 SnowLuma 实例（没有目录也没有令牌）：控制中心知道 SnowLuma 目录时自动补上，按账号连上；用户自己配过令牌的实例不动', { timeout: 60_000, skip: SKIP }, async () => {
+  const snow = await createFakeSnowLuma({ token: 'snow-tok', selfId: 10002 });
+  const d = tmp();
+  fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ version: '9.9.9-test' }));
+  fs.mkdirSync(path.join(d, 'node_modules'));
+  fs.writeFileSync(path.join(d, 'config.json'), JSON.stringify({ ownerQQ: 12345678 }));
+  // 假 SnowLuma 目录：账号配置里是假后端的端口与令牌（与真实 SnowLuma 的 config/onebot_<QQ>.json 同格式）
+  const snowDir = path.join(d, 'SnowLuma-test');
+  fs.mkdirSync(path.join(snowDir, 'config'), { recursive: true });
+  fs.writeFileSync(path.join(snowDir, 'package.json'), JSON.stringify({ name: '@snowluma/runtime', version: '2.0.3' }));
+  fs.writeFileSync(path.join(snowDir, 'index.mjs'), '');
+  fs.writeFileSync(path.join(snowDir, 'launcher.bat'), '');
+  fs.writeFileSync(path.join(snowDir, 'config', 'onebot_10002.json'), JSON.stringify({ networks: { wsServers: [{ host: '127.0.0.1', port: snow.port, accessToken: snow.token }] } }));
+  const pdir = path.join(d, 'platform-data');
+  fs.mkdirSync(pdir, { recursive: true });
+  // 升级场景：平台里有一个只带默认值的 snowluma-main，外加一个用户自己配了令牌的实例
+  fs.writeFileSync(path.join(pdir, 'platform.json'), JSON.stringify({ instances: [
+    { id: 'snowluma-main', provider: 'snowluma', enabled: true, upstream: { wsUrl: 'ws://127.0.0.1:3001', accessToken: '', homeDir: '' } },
+    { id: 'snowluma-mine', provider: 'snowluma', enabled: false, upstream: { wsUrl: 'ws://127.0.0.1:1', accessToken: 'my-token', homeDir: '' } },
+  ] }));
+  const net = await import('node:net');
+  const port = await new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
+  fs.mkdirSync(path.join(d, 'state'), { recursive: true });
+  fs.writeFileSync(path.join(d, 'state', 'control-center.json'), JSON.stringify({ platformPort: port, snowlumaDir: snowDir }));
+  const prevData = process.env.INTERFACE_PLATFORM_DATA_DIR;
+  process.env.INTERFACE_PLATFORM_DATA_DIR = pdir;
+  const cc = await startControlCenter({ open: false, port: 0, root: d, bridgeEntry: path.join(d, 'nope.mjs'), platformEntry: path.join(PLATFORM_DIR, 'src', 'index.mjs'), installSignalHandlers: false, exitOnShutdown: false, log: () => {} });
+  const T = cc.token;
+  try {
+    assert.equal((await api(cc.port, T, 'POST', '/api/platform/start', {})).body.ok, true);
+    const st = await until(async () => {
+      snow.heartbeat();
+      const s = await api(cc.port, T, 'GET', '/api/state');
+      const main = s.body.platform.overview?.instances?.find((i) => i.id === 'snowluma-main');
+      return main?.upstream?.homeDir && (main.links ?? []).some((l) => l.state === 'open' && l.account === 'qq:10002') && s;
+    }, 20_000, 'snowluma-main 自动补上目录并连上');
+    const insts = st.body.platform.overview.instances;
+    assert.equal(path.resolve(insts.find((i) => i.id === 'snowluma-main').upstream.homeDir), path.resolve(snowDir));
+    assert.equal(insts.find((i) => i.id === 'snowluma-mine').upstream.homeDir, '', '用户自己配了令牌的实例不动');
+    const logs = await api(cc.port, T, 'GET', '/api/logs?source=platform&after=0');
+    assert.ok(logs.body.lines.some((l) => l.text.includes('已自动补上目录')), '在平台日志里说明做了什么');
+  } finally {
+    await cc.shutdown('test');
+    await snow.close();
+    if (prevData === undefined) delete process.env.INTERFACE_PLATFORM_DATA_DIR; else process.env.INTERFACE_PLATFORM_DATA_DIR = prevData;
+  }
+});

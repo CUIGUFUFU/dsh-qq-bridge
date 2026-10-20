@@ -908,6 +908,23 @@ tr:last-child td {
 .slang-panel {
   display:none
 }
+.dsh-notice {
+  margin-top:8px;
+  padding:8px 10px;
+  border:1px solid var(--card-border);
+  border-radius:8px;
+  font-size:13px;
+  color:var(--muted)
+}
+.dsh-notice.warn {
+  background:var(--warn-bg);
+  border-color:var(--warn-border);
+  color:var(--warn-fg)
+}
+.slang-guess {
+  font-style:italic;
+  overflow-wrap:anywhere
+}
 .slang-panel.active {
   display:block
 }
@@ -2526,13 +2543,27 @@ button:active:not(:disabled) {
     </section>
 <section id="section-dsh" data-page="overview" class="card span-all">
       <h2 data-note="下一条消息生效">DSH 模型与思考强度</h2>
-      <div class="meta">模型：<span id="dshModelText">-</span> ｜ 提供方：<span id="dshProviderText">-</span></div>
-      <div class="row" style="margin-top:10px">
+      <div class="meta">当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span></div>
+      <div class="row dsh-model-row" style="margin-top:10px">
+        <label style="flex:0 0 auto">提供方</label>
+        <select id="dshProviderSelect" style="flex:0 1 220px"></select>
+        <label style="flex:0 0 auto">模型</label>
+        <select id="dshModelSelect" style="flex:0 1 260px"></select>
+      </div>
+      <div class="row dsh-model-row" style="margin-top:8px">
         <label style="flex:0 0 auto">思考强度</label>
         <select id="dshEffortSelect" style="flex:0 1 220px"></select>
+        <label style="flex:0 0 auto" title="DSH 的模型目录不说明模型能不能看图：自动 = 只有核实过的模型才把图片交给它，其余把图片改成文字占位">看图能力</label>
+        <select id="dshVisionSelect" style="flex:0 1 220px">
+          <option value="auto">自动（未知的按不能看图）</option>
+          <option value="yes">能看图</option>
+          <option value="no">不能看图</option>
+        </select>
         <button id="dshEffortSave">保存</button>
+        <button id="dshCatalogRefresh" class="small" title="重新读取 DSH 的模型目录">刷新目录</button>
         <span class="meta" id="dshEffortMsg"></span>
       </div>
+      <div id="dshModelNotices"></div>
       <div class="meta" id="dshEffortNote"></div>
       <div class="meta" id="dshEffortSideEffect"></div>
     </section>
@@ -2679,6 +2710,7 @@ button:active:not(:disabled) {
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="slangModalTitle" tabindex="-1">
         <h3 id="slangModalTitle">确认黑话</h3>
         <div class="meta" id="slangModalContent" style="margin-bottom:6px"></div>
+        <div class="meta slang-guess" id="slangModalGuess" style="display:none;margin-bottom:6px"></div>
         <label>含义 *</label>
         <input type="text" id="slangModalMeaning" placeholder="必须填写，确认后才会注入 AI 上下文">
         <label>用法（可选）</label>
@@ -3024,36 +3056,115 @@ async function refreshSimPrompt() {
 }
 
 // ── DSH 模型与思考强度 ──────────────────────────────────────────────────────
-async function refreshDshModel() {
+// 提供方 / 模型 / 思考强度三个下拉联动，选项全部来自桥接转发的 DSH 模型目录（GET /api/dsh/model 的 providers）；
+// 目录取不到时只显示当前配置（保存会被服务端拒绝）。服务端会再校验一次，页面只负责好用。
+const DSH_FIRST_PARTY = ['deepseek-official', 'deepseek-account'];
+let dshModelState = null;
+function dshProviders() { return Array.isArray(dshModelState?.providers) ? dshModelState.providers : []; }
+function dshSelectedProvider() { return dshProviders().find((p) => p.id === document.getElementById('dshProviderSelect').value) || null; }
+function dshSelectedEntry() {
+  const p = dshSelectedProvider();
+  return p ? (p.models || []).find((m) => m.id === document.getElementById('dshModelSelect').value) || null : null;
+}
+function dshFillSelect(select, items, value) {
+  select.replaceChildren();
+  for (const item of items) {
+    const el = document.createElement('option');
+    el.value = item.value;
+    el.textContent = item.label;
+    if (item.title) el.title = item.title;
+    select.appendChild(el);
+  }
+  if (items.some((x) => x.value === value)) select.value = value;
+}
+function dshFillModels(preferred) {
+  const r = dshModelState || {};
+  const p = dshSelectedProvider();
+  const models = p ? (p.models || []) : [];
+  const items = models.length
+    ? models.map((m) => ({ value: m.id, label: `${m.name}${m.name !== m.id ? `（${m.id}）` : ''}${m.vision === 'yes' ? ' · 能看图' : ''}${m.priced ? '' : ' · 价格未覆盖'}`, title: m.description || '' }))
+    : [{ value: r.model || '', label: r.model || '-' }];
+  dshFillSelect(document.getElementById('dshModelSelect'), items, preferred ?? r.model);
+}
+function dshFillEfforts(preferred) {
+  const r = dshModelState || {};
+  const select = document.getElementById('dshEffortSelect');
+  const entry = dshSelectedEntry();
+  if (entry && !(entry.efforts || []).length) {
+    // 无档位模型：强度下拉置灰，保存时不带档位
+    dshFillSelect(select, [{ value: '', label: '该模型没有思考档位' }], '');
+    select.disabled = true;
+    return;
+  }
+  select.disabled = false;
+  const efforts = entry ? entry.efforts : (r.options || []).map((id) => ({ id, name: r.labels?.[id]?.name || id, description: r.labels?.[id]?.description || '' }));
+  const def = entry ? entry.defaultEffort : (r.providerDefault || null);
+  const items = efforts.map((e) => ({ value: e.id, label: `${e.id}${e.id === def ? '（默认）' : ''}${e.id === 'off' ? ' · 关闭思考' : ''}`, title: e.description || '' }));
+  const want = [preferred, r.reasoningEffort, def].find((v) => v && items.some((x) => x.value === v));
+  dshFillSelect(select, items, want || items[0]?.value);
+}
+// 保存前的预览提示（措辞与服务端 selectionNotices 一致；保存后以服务端返回的为准）
+function dshPreviewNotices() {
+  const provider = document.getElementById('dshProviderSelect').value;
+  const entry = dshSelectedEntry();
+  const effort = document.getElementById('dshEffortSelect').value;
+  const vision = document.getElementById('dshVisionSelect').value;
+  const notices = [];
+  if (provider && !DSH_FIRST_PARTY.includes(provider)) notices.push({ level: 'warn', text: `${provider} 不是 DeepSeek 自家的提供方：QQ 里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理，请先确认它的隐私政策。` });
+  if (effort === 'off') notices.push({ level: 'warn', text: '思考已关闭：回复更快，但二代仿真里的工具调用、读群判断和人格一致性可能变差。' });
+  const sees = vision === 'yes' || (vision === 'auto' && entry?.vision === 'yes') || (vision === 'auto' && !entry && dshModelState?.visionKnown === 'yes');
+  if (!sees) notices.push({ level: 'info', text: vision === 'no'
+    ? '已设为不能看图：QQ 里的图片、表情会改成文字占位（例如「[图片1：当前模型不能看图，已省略]」）。'
+    : '这个模型能不能看图未知：按不能看图处理，图片、表情会改成文字占位；确认它能看图的话，把「看图能力」改成「能看图」。' });
+  const priced = entry ? entry.priced : dshModelState?.priced;
+  if (priced === false) notices.push({ level: 'info', text: '价格表没有覆盖这个模型：令牌与花费页的金额按 DeepSeek-V4.1-Flash 估算，并标「估算」。' });
+  return notices;
+}
+function dshRenderNotices(notices) {
+  const box = document.getElementById('dshModelNotices');
+  box.replaceChildren();
+  for (const n of notices || []) {
+    const el = document.createElement('div');
+    el.className = n.level === 'warn' ? 'dsh-notice warn' : 'dsh-notice';
+    el.textContent = (n.level === 'warn' ? '⚠️ ' : 'ℹ️ ') + n.text;
+    box.appendChild(el);
+  }
+}
+async function refreshDshModel(force = false) {
   try {
-    const r = await api('/api/dsh/model');
+    const r = await api('/api/dsh/model' + (force ? '?refresh=1' : ''));
+    dshModelState = r;
     document.getElementById('dshModelText').textContent = r.model || '-';
     document.getElementById('dshProviderText').textContent = r.provider || '-';
-    const select = document.getElementById('dshEffortSelect');
-    const labels = r.labels || {};
-    select.replaceChildren();
-    for (const option of (r.options || [])) {
-      const el = document.createElement('option');
-      el.value = option;
-      const info = labels[option] || {};
-      const isDefault = option === (r.providerDefault || r.default);
-      el.textContent = `${option}${isDefault ? '（默认）' : ''}`;
-      if (info.description) el.title = info.description;
-      select.appendChild(el);
-    }
-    select.value = r.reasoningEffort;
+    const providers = dshProviders();
+    const providerItems = providers.length
+      ? providers.map((p) => ({ value: p.id, label: `${p.name}${p.name !== p.id ? `（${p.id}）` : ''}${p.thirdParty ? ' · 第三方' : ''}` }))
+      : [{ value: r.provider || '', label: r.provider || '-' }];
+    dshFillSelect(document.getElementById('dshProviderSelect'), providerItems, r.provider);
+    dshFillModels(r.model);
+    dshFillEfforts(r.reasoningEffort);
+    document.getElementById('dshVisionSelect').value = r.vision || 'auto';
+    dshRenderNotices(r.notices || dshPreviewNotices());
+    const modelCount = providers.reduce((n, p) => n + (p.models || []).length, 0);
     const parts = [];
-    if (r.providerDefault) parts.push(`DSH 出厂默认是 ${r.providerDefault}`);
-    parts.push(r.catalogSource === 'dsh' ? '档位取自 DSH 实际公布的能力' : '未能读取 DSH 能力，档位为内置清单');
+    if (r.catalogSource === 'dsh') parts.push(`选项取自 DSH 的模型目录（${providers.length} 个提供方 / ${modelCount} 个模型）`);
+    else parts.push(`目录不可用${r.catalogError ? '（' + r.catalogError + '）' : ''}：只显示当前配置和内置档位，暂时不能切换模型`);
+    if (r.providerDefault) parts.push(`当前模型的默认强度是 ${r.providerDefault}`);
+    if ((r.failures || []).length) parts.push('读取失败的提供方：' + r.failures.map((f) => `${f.name || f.id}（${f.message}）`).join('、'));
     document.getElementById('dshEffortNote').textContent = parts.join('；') + '。';
     document.getElementById('dshEffortSideEffect').textContent = r.globalSideEffect
-      ? '注意：切换会同时写入 DSH 的全局默认（~/.dsh/settings.yaml 的 agent-default-model），也就是 Web GUI 里新建会话的默认强度也会跟着变。'
+      ? '注意：切换会同时写入 DSH 的全局默认（~/.dsh/settings.yaml 的 agent-default-model），也就是 Web GUI 里新建会话的默认模型和强度也会跟着变。'
       : '';
     document.getElementById('dshEffortMsg').textContent = '';
   } catch (error) {
     document.getElementById('dshEffortMsg').textContent = '读取失败：' + (error?.message ?? error);
   }
 }
+document.getElementById('dshProviderSelect').addEventListener('change', () => { dshFillModels(); dshFillEfforts(); dshRenderNotices(dshPreviewNotices()); });
+document.getElementById('dshModelSelect').addEventListener('change', () => { dshFillEfforts(); dshRenderNotices(dshPreviewNotices()); });
+document.getElementById('dshEffortSelect').addEventListener('change', () => dshRenderNotices(dshPreviewNotices()));
+document.getElementById('dshVisionSelect').addEventListener('change', () => dshRenderNotices(dshPreviewNotices()));
+document.getElementById('dshCatalogRefresh').addEventListener('click', () => refreshDshModel(true));
 
 async function refreshWhitelist() {
   try {
@@ -3276,16 +3387,24 @@ document.getElementById('roleInjectMaxSave').addEventListener('click', async () 
   if (r.ok) refreshRoles();
 });
 
-// ── DSH 思考强度 ────────────────────────────────────────────────────────────
+// ── DSH 模型保存 ────────────────────────────────────────────────────────────
 document.getElementById('dshEffortSave').addEventListener('click', async () => {
-  const effort = document.getElementById('dshEffortSelect').value;
   const msg = document.getElementById('dshEffortMsg');
+  const payload = {
+    provider: document.getElementById('dshProviderSelect').value,
+    model: document.getElementById('dshModelSelect').value,
+    reasoningEffort: document.getElementById('dshEffortSelect').value,
+    vision: document.getElementById('dshVisionSelect').value,
+  };
+  // 第一次换到第三方提供方：保存前再确认一次隐私
+  if (!DSH_FIRST_PARTY.includes(payload.provider) && payload.provider !== dshModelState?.provider
+    && !confirm(`${payload.provider} 不是 DeepSeek 自家的提供方。保存后，QQ 里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理。确定要切换吗？`)) return;
   msg.textContent = '保存中…';
   msg.className = 'meta';
-  const r = await api('/api/dsh/effort', 'POST', { reasoningEffort: effort });
-  msg.textContent = r.ok ? `✅ 已设为 ${r.reasoningEffort}，下一条消息生效` : ('❌ ' + (r.error || '保存失败'));
+  const r = await api('/api/dsh/model', 'POST', payload);
+  msg.textContent = r.ok ? `✅ 已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效` : ('❌ ' + (r.error || '保存失败'));
   msg.className = r.ok ? 'meta ok' : 'meta err';
-  if (r.ok) refreshDshModel();
+  if (r.ok) { await refreshDshModel(); msg.textContent = `✅ 已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效`; msg.className = 'meta ok'; }
 });
 document.getElementById('silentOn').addEventListener('click', async () => { await api('/api/role-mode', 'POST', { mode: 'silent' }); refresh(); });
 document.getElementById('silentOff').addEventListener('click', async () => { await api('/api/role-mode', 'POST', { mode: 'active' }); refresh(); });
@@ -4194,8 +4313,17 @@ function slangSourcesHtml(e) {
     ? e.sources.slice(0, 5).map((s) => `<span class="meta">🔗 ${esc(s)}</span>`).join('<br>')
     : '';
 }
+// 研究「未确认」时 AI 给的推测（lastGuess）：只是给管理员参考，不是含义——
+// 不算「已研究」、不能凭它确认，也不会注入提示词；「采用为含义」只是填进编辑框，保存仍由管理员点。
+function slangGuessHtml(e) {
+  const g = e?.lastGuess;
+  if (!g || !(g.meaning || g.usage || g.example)) return '';
+  const when = g.at ? new Date(g.at).toLocaleString('zh-CN', { hour12: false }) : '';
+  return `<span class="meta slang-guess">AI 推测（未确认${when ? '，' + esc(when) : ''}）：${esc(g.meaning || '—')}`
+    + (g.usage ? '；用法：' + esc(g.usage) : '') + (g.example ? '；例：' + esc(g.example) : '') + '</span>';
+}
 function slangSearchFields(e) {
-  return [e.content, e.meaning, e.usage, e.example, e.risk, Array.isArray(e.sources) ? e.sources.join(' ') : '', Array.isArray(e.evidence) ? e.evidence.map((x) => x.text || '').join(' ') : ''].join(' ').toLowerCase();
+  return [e.content, e.meaning, e.usage, e.example, e.risk, e.lastGuess?.meaning || '', Array.isArray(e.sources) ? e.sources.join(' ') : '', Array.isArray(e.evidence) ? e.evidence.map((x) => x.text || '').join(' ') : ''].join(' ').toLowerCase();
 }
 function getSlangLimit() {
   const id = slangTabStatus(slangActiveTab) === 'candidate' ? 'slangLimitCand' : slangActiveTab === 'confirmed' ? 'slangLimitConfirmed' : 'slangLimitRejected';
@@ -4260,7 +4388,10 @@ function renderSlangPanel() {
   let html = `<div class="meta" style="padding:6px 8px">共 ${filtered.length} 条，显示 ${shown.length} 条（可滚动查找）</div>`;
   html += '<table><tr><th>选择</th><th>词条</th><th>次数</th><th>来源</th><th>含义 / 用法 / 示例</th><th>参考来源</th><th>语境证据</th><th>操作</th></tr>';
   for (const e of shown) {
-    const meaning = e.meaning ? esc(e.meaning) : (status === 'candidate' ? '<span class="meta">待研究</span>' : '<span class="meta">无</span>');
+    const guessHtml = status === 'candidate' && !e.meaning ? slangGuessHtml(e) : '';
+    const meaning = e.meaning ? esc(e.meaning) : (status === 'candidate'
+      ? '<span class="meta">待研究</span>' + (guessHtml ? `<br>${guessHtml}<br><button class="small" data-slang-adopt="${esc(e.id)}" title="把推测填进编辑框，改好后再保存">采用为含义</button>` : '')
+      : '<span class="meta">无</span>');
     const checked = slangSelected.has(e.id) ? ' checked' : '';
     const actions = [];
     if (status === 'candidate') {
@@ -4292,6 +4423,7 @@ function renderSlangPanel() {
   }));
   box.querySelectorAll('[data-slang-confirm]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangConfirm, 'confirm')));
   box.querySelectorAll('[data-slang-edit]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangEdit, 'edit')));
+  box.querySelectorAll('[data-slang-adopt]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangAdopt, 'edit', { adoptGuess: true })));
   box.querySelectorAll('[data-slang-reject]').forEach((btn) => btn.addEventListener('click', async () => {
     const r2 = await api('/api/slang/' + btn.dataset.slangReject + '/reject', 'POST', {});
     if (!r2.ok) alert(r2.error || '拒绝失败');
@@ -4328,7 +4460,7 @@ async function refreshSlang() {
   }
 }
 
-function openSlangModal(id, mode) {
+function openSlangModal(id, mode, { adoptGuess = false } = {}) {
   const e = slangEntriesCache.find((x) => x.id === id);
   if (!e) return;
   slangModalId = id;
@@ -4342,6 +4474,17 @@ function openSlangModal(id, mode) {
   document.getElementById('slangModalExample').value = e.example || '';
   document.getElementById('slangModalRisk').value = e.risk || '';
   document.getElementById('slangModalSources').value = Array.isArray(e.sources) ? e.sources.join('\n') : '';
+  const guessBox = document.getElementById('slangModalGuess');
+  const guessHtml = !e.meaning ? slangGuessHtml(e) : '';
+  guessBox.innerHTML = guessHtml ? guessHtml + '<br>' + (adoptGuess ? '已把推测填进空着的栏位：请核对、修改后再保存（推测不一定对）。' : '可以参考它填写含义。') : '';
+  guessBox.style.display = guessHtml ? '' : 'none';
+  if (adoptGuess && guessHtml) {
+    // 只填空着的栏位，不覆盖管理员已经写的内容
+    for (const [field, inputId] of [['meaning', 'slangModalMeaning'], ['usage', 'slangModalUsage'], ['example', 'slangModalExample']]) {
+      const input = document.getElementById(inputId);
+      if (!input.value.trim() && e.lastGuess[field]) input.value = e.lastGuess[field];
+    }
+  }
   document.getElementById('slangModalDirectConfirm').textContent = mode === 'confirm' ? '直接确认（转正）' : '保存修改';
   document.getElementById('slangModalSendResearch').style.display = mode === 'confirm' && e.status === 'candidate' ? '' : 'none';
   document.getElementById('slangModalOverlay').classList.add('open');

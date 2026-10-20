@@ -1,6 +1,6 @@
 # QQ ↔ DeepSeek Harness 桥接
 
-**支持系统：Windows · macOS · Linux**（qq-bridge-enhanced v1.0.1）
+**支持系统：Windows · macOS · Linux**（qq-bridge-enhanced v1.0.2）
 
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
@@ -14,7 +14,7 @@
 
 ---
 
-## 🆕 增强版（qq-bridge-enhanced v1.0.1）—— 支持 Windows、macOS、Linux
+## 🆕 增强版（qq-bridge-enhanced v1.0.2）—— 支持 Windows、macOS、Linux
 
 > 本仓库是 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 的二次开发版本（来源与授权见 [NOTICE.md](NOTICE.md)），已合并上游 r4 的修复。
 > 原版的全部功能（消息桥接、多群白名单、reserved2 二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查）保持不变；
@@ -137,7 +137,7 @@ QQ 消息 ──► SnowLuma（OneBot v11 WS）──► 本桥接进程 ──�
   - **令牌与花费看板**：实时显示 AI 的 token 消耗与折算金额（元），可下钻到**每个群 / 每个好友 / 每一轮对话**（轮次、步数、缓存命中/未命中输入、输出、命中率、花费、峰谷时段），并有**按时间的消耗走势图**（24 小时 / 3 天 / 7 天 / 30 天，柱子按高峰/空闲着色，一眼看出什么时候烧得凶、哪几个小时是 2 倍价）。累计总量取自 DSH 的 `tokenUsage` 投影（精确，含桥接启动前的历史），逐轮明细由 `assistant/message` 的 `usage` 折叠而来；金额按 DeepSeek 官方价目表折算并区分**高峰 / 空闲时段**（高峰单价为空闲的 2 倍，已内置中国法定节假日）。详见 [docs/guides/TOKEN_USAGE_CONSOLE.md](docs/guides/TOKEN_USAGE_CONSOLE.md)
   - **人格（角色扮演）管理**：列表点选即可载入查看/编辑提示词，支持新建、保存修改、改名（自动重命名文件）、另存为副本、删除；超过注入上限或含一代专用指令会实时提示
   - **两层提示词可分别查看与修改**：「仿真提示词」（预设内置，管行为与协议，保存后同步到 DSH，需重启生效）与「人格提示词」（`roles/*.md`，管人设与语气，保存即生效）；仿真层保存前做安全不变量校验与自动备份，可一键还原
-  - **DSH 思考强度**：默认 `max`，可选 `high` / `low`，档位从 DSH 实际公布的能力读取，保存后下一条消息生效；控制台会明示该设置同时写入 DSH 全局默认（`~/.dsh/settings.yaml`）
+  - **DSH 模型与思考强度**：提供方 / 模型 / 思考强度三个下拉联动，选项来自 DSH 的模型目录（能用上 DSH 里配好的其它提供方），保存后下一条消息生效；默认仍是 `deepseek-flash` + `max`。换到第三方提供方会提示隐私，不能看图的模型自动把图片改成文字，价格未覆盖的模型标「估算」；控制台会明示该设置同时写入 DSH 全局默认（`~/.dsh/settings.yaml`）
 - **运行模式**：
   - `chat`：白名单群 + 白名单私聊 → qq-chat 安全聊天
   - `closed-agent`：仅私聊 owner（config.json 的 ownerQQ，可在控制台设置）→ 完整工具（默认用 DSH 自己声明的默认 preset，即 `standard`；可在控制台「closed-agent preset」下拉改为任意 DSH preset），可在 QQ 上操控 DSH
@@ -173,7 +173,7 @@ npm install        # 安装依赖（postinstall 会自动修补 @snowluma/sdk �
 | 字段 | 说明 |
 | --- | --- |
 | `dsh.baseUrl` | DSH Web 地址；留空（默认）= 自动识别：桌面版 `http://127.0.0.1:19387`，命令行版 `http://127.0.0.1:3080` |
-| `dsh.provider` / `dsh.model` / `dsh.reasoningEffort` | DSH 会话使用的模型/推理强度；若你的 DSH 没有示例中的模型，改成 DSH 设置页里可用的模型即可（选择失败只打日志，不阻塞启动） |
+| `dsh.provider` / `dsh.model` / `dsh.reasoningEffort` / `dsh.vision` | DSH 会话使用的模型 / 推理强度 / 看图能力；建议在控制台「DSH 模型与思考强度」里选（选项来自 DSH 模型目录，保存即生效），说明见 [CONFIGURATION.md](docs/guides/CONFIGURATION.md)（选择失败只打日志，不阻塞启动） |
 | `dsh.authToken` | DSH launch token（进程启动凭据）。**通常应留空**：留空时桥接用 `~/.dsh/.credentials.yaml` 里持久化的签名密钥**离线铸造**会话 Cookie，不依赖任何进程期状态（DSH 0.1.7 起启动 token 只存在于内存、日志里那条是上一个进程的陈旧值，换 Cookie 只会 401）。只有显式填了才会优先走 token 交换 |
 | `dsh.authHeader` / `dsh.authPrefix` | 保留字段，当前新版 DSH 链路使用 Cookie 交换，不再直接发送该鉴权头 |
 | `snowluma.wsUrl` | SnowLuma OneBot **WebSocket** 地址（如 `ws://127.0.0.1:3001`） |

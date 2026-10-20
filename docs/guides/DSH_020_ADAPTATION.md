@@ -301,11 +301,11 @@ HTTP transport 下起作用，而三个 MCP server 全是 stdio。清掉是为�
 | **`$events` / 审批提问链路** | `$events`、`$events/result` 仍在；waterfall 帧形状不变 `{type:'waterfall', event, eventId, agentId, request}`；`approval/request` 与 `user-questions/request` 仍在 `API_REMOTE_FORWARDED_EVENTS` 白名单里；`request.toolName/callId/reason` 与 `request.questions` 字段未变；outcome 形状 `{kind:'next'|'result'|'rejected'}` 与网关校验一致 |
 | **`session/follow`** | 请求形状 `{ address:{kind:'session',sessionId}, maxMessages }` 未变；快照键集与 `projections` 仍在 |
 | **三个 MCP server** | DSH 客户端已升级到官方 SDK **v2**，而 server 用的是 v1.30.0：实测五个协议修订版本两侧完全一致，`server/discover` 探测失败会**干净回落**到 2025 握手；`toolCallTimeoutMs` / `serverName` / `mcp__<server>__<tool>` 命名规则 / `serverInfo` 形状均未变；MCP 输入 schema **原样透传**（harness 的 JSON Schema 子集只约束 output schema，因此 ~20 处 `z.union` 产生的 `anyOf` 不受影响）。活链路实测：`mcp__snowluma__qq_status` 返回真实账号信息，三个 server 共 **38** 个工具 |
-| **模型目录** | `deepseek-flash` 仍在（新增 `deepseek-v4-pro`），思考档位 `off/low/high/max`。控制台把 `off` 过滤掉是**有意的产品决策**（QQ 聊天助手依赖思考），与内置白名单自洽，未改；实测 `/api/dsh/model` 返回 `options:["low","high","max"]` 且 `labels` 里带 `off`，说明动态读取链路在 0.2.0 正常 |
+| **模型目录** | `deepseek-flash` 仍在（新增 `deepseek-v4-pro`），思考档位 `off/low/high/max`。当时控制台把 `off` 过滤掉（QQ 聊天助手依赖思考）。**v1.0.2 起改为放开**：档位完全以目录为准，选 `off` 时控制台提示可能影响工具调用和回复质量；实测 `deepseek-flash` / `deepseek-v4-pro` 公布 `off/low/high/max`（`defaultEffort: high`）。DSH 桌面版 0.2.1 的提供方名是 `deepseek-account` |
 | **`settings/update` 参数形状** | 是平铺多参数（见 §4.2），桥接原本就对 |
 | **preset / bundle 机制** | `@deepseek-ai/dsh-agent-preset` 行 + `plugins/qq-agent-presets` bundle patch 仍有效；两个 preset 的 persona schema 仍通过；`id: qq-mode` 行 + 导出的 `Config` 仍能让命名空间可读写（§4.2） |
 | **`session/create` + preset** | 活 DSH 实测：挂 `qq-chat-v2` 成功，`agentPresets/list` 含 `qq-chat` 与 `qq-chat-v2` |
-| **`session/modelCatalog`** | 仍可用，返回 `default` / `routableProviders` / `groups` / `failures`，桥接的思考强度下拉依赖它 |
+| **`session/modelCatalog`** | 仍可用，返回 `default` / `routableProviders` / `groups` / `failures`，桥接控制台的提供方 / 模型 / 思考强度下拉都依赖它（`src/dsh-model.js`，60 秒缓存）。条目里**没有** `inputModalities`，看图能力用「已知表 + 未知」表达 |
 
 ---
 

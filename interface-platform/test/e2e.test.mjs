@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createFakeSnowLuma } from './fixtures/fake-snowluma.mjs';
 import { startPlatform } from '../src/index.mjs';
 
@@ -24,8 +24,9 @@ async function until(fn, ms = 3000, what = '条件') {
 let SDK = null;
 try { SDK = await import('@snowluma/sdk'); } catch {}
 if (!SDK) {
-  const here = path.dirname(new URL(import.meta.url).pathname);
-  const dirs = [process.env.SNOWLUMA_SDK_DIR, path.resolve(here, '..', '..', 'qq-bridge-enhanced', 'node_modules', '@snowluma', 'sdk')].filter(Boolean);
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  // 平台在仓库里（interface-platform/）：SDK 在仓库根目录的 node_modules；旧布局（与仓库平行的目录）也认
+  const dirs = [process.env.SNOWLUMA_SDK_DIR, path.resolve(here, '..', '..', 'node_modules', '@snowluma', 'sdk'), path.resolve(here, '..', '..', 'qq-bridge-enhanced', 'node_modules', '@snowluma', 'sdk')].filter(Boolean);
   for (const d of dirs) {
     try {
       const main = JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8')).main ?? 'dist/index.js';
@@ -322,7 +323,8 @@ test('管理接口：只认管理令牌；概览含实例/账号/支持范围；
 });
 
 test('静态边界：平台代码不启停任何进程、不含 SnowLuma 进程控制', () => {
-  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'src');
+  // fileURLToPath 而不是 URL.pathname：Windows 上 pathname 是 /C:/…，拼出来会变成 C:\C:\…
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
   const files = [];
   const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.mjs')) files.push(p); } };
   walk(root);

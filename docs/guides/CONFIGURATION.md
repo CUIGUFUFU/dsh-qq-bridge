@@ -113,6 +113,23 @@ AI **收藏**群友的表情、**发送**收藏表情时，桥接会先自己下
 只在网关是 NapCat 时用到：NapCat 的 `add_custom_face` 只接受本地文件路径，桥接会把已校验的表情字节写成一个随机名、权限 0600 的临时文件交给它，调用结束立即删除。
 留空时：macOS 用 QQ 沙盒容器里的 `~/Library/Containers/com.tencent.qq/Data/tmp`（App Store 版 QQ 读不到系统临时目录），其它系统用系统临时目录。SnowLuma 不用这个目录。
 
+## `dsh.provider` / `dsh.model` / `dsh.reasoningEffort` / `dsh.vision` —— 模型选择（v1.0.2 起可在控制台改）
+
+推荐在桥接控制台「运行总览 → DSH 模型与思考强度」里选：提供方、模型、思考强度三个下拉联动，选项全部来自 DSH 的模型目录（`session.modelCatalog`），
+保存后对已有会话的下一条消息生效，不用重启桥接。手改 `config.json` 也可以，重启桥接后生效。
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `dsh.provider` | `deepseek-official` | 提供方。DSH 桌面版 0.2.1 起 DeepSeek 自家的提供方叫 `deepseek-account`。其它提供方是第三方：QQ 里的聊天内容会发给它们，控制台会提示隐私并在保存前再确认一次 |
+| `dsh.model` | `deepseek-flash` | 模型 id（DeepSeek-V4.1-Flash，能看图） |
+| `dsh.reasoningEffort` | `max` | 思考档位：`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`，具体模型支持哪些以 DSH 目录为准；留空 = 用模型默认。`off` 是关闭思考，回复更快但工具调用和人格一致性可能变差。模型没有思考档位时自动不带这个参数 |
+| `dsh.vision` | `auto` | 看图能力：`auto` = 只有核实过能看图的模型（目前是 DeepSeek 的 `deepseek-flash`）才把 QQ 图片交给它，其余模型把图片、表情改成文字占位（避免整条消息被拒）；`yes` / `no` = 手动指定 |
+
+- 控制台保存时由服务端按目录硬校验：提供方 / 模型不在目录里、档位不在该模型的列表里都会拒绝；目录读不到时**不保存**（返回 503），聊天照常按原配置进行。
+- 价格表（`src/model-prices.js`）只收录 DeepSeek 自家的价目；换到其它模型后，「令牌与花费」的金额按 DeepSeek-V4.1-Flash 估算并标「估算」。
+- 只有控制台能改模型：AI 的令牌调不了这些接口，QQ 私聊管理通道也没有改模型的命令。
+- 和思考强度一样，切换会同时写入 DSH 的全局默认（`~/.dsh/settings.yaml` 的 `agent-default-model`），Web GUI 里新建会话的默认模型也会跟着变。
+
 ## `dsh.baseUrl` —— DSH 地址（默认留空 = 自动识别）
 
 留空时按顺序识别：桌面版固定端口 19387 / 命令行版 3080 → 都连不上时查 DSH 桌面版进程正在监听的回环端口（DSH 桌面版 0.2.1 起每次启动换随机端口），

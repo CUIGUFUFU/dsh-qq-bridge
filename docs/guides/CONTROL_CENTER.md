@@ -128,6 +128,10 @@ NapCat 日志里也会在生成二维码的位置插一张能扫的小图（日�
 | NapCat 设置 | macOS：QQ.app 位置；Windows：NapCat.Shell 的启动文件（.bat / .cmd / .exe）；两者都有 NapCat 目录（含 `config/onebot11_<QQ号>.json`）和可选的快速登录 QQ 号。留空 = 默认位置。保存在 `state/control-center.json`；改目录会同步给接口平台的 NapCat 实例 |
 | 浏览… | 弹出系统自带的选择窗口（macOS：`osascript` 的 choose folder / choose file；Windows：PowerShell 的文件夹 / 文件对话框），只在你点击时出现，可能在浏览器窗口后面。SnowLuma 的「浏览…」在 macOS 上也能用了 |
 
+**换 SnowLuma 目录（例如升级到新版本）**：新目录里没有账号配置和 WebUI 密码、旧目录却有时，控制中心会先提醒迁移——
+直接换过去 SnowLuma 会当成全新安装：生成新的随机 WebUI 密码（浏览器保存的旧密码失效）、要重新扫码登录、重新开 OneBot WebSocket。
+点「去迁移（推荐）」会打开更新助手并填好新目录：停止 SnowLuma 后点「迁移数据并切换」，旧目录的 `config/`（含 `webui.json` 密码）、`data/` 会先备份再复制过去。
+
 Linux 上 SnowLuma（2.0 起）和 NapCat 都可用：SnowLuma 按发行包自带的 `launcher.sh` 启动，发行包与本机平台 / 架构不符、或 Lite 版本机 Node 不够时会直接说明原因；NapCat 在「NapCat 设置」里选 `.sh` 启动脚本和 NapCat 目录。「浏览…」在有 zenity / kdialog 时弹出系统窗口，否则手动填路径。
 
 macOS 上没有 SnowLuma：QQ 经 **NapCat** 接入（自己安装并启动 NapCat、开启 WebSocket 服务端，再在「接入实例」里填 NapCat 配置目录或 WS 地址 + 令牌）；页面上不会出现 SnowLuma 程序区。

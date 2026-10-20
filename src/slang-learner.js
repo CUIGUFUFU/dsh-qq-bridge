@@ -77,9 +77,39 @@ export function normalizeSlangEntry(raw) {
         : ev))
       : [],
     lastInferenceCount: Math.max(0, Number(entry.lastInferenceCount) || 0),
+    lastGuess: normalizeSlangGuess(entry.lastGuess, clip),
     createdAt: String(entry.createdAt || nowIso()),
     updatedAt: String(entry.updatedAt || nowIso()),
   };
+}
+
+/**
+ * 最近一次研究「未确认」时 AI 给出的推测（`lastGuess`）。
+ *
+ * ⚠️ 只给控制台的管理员看，**不是**含义：
+ * - 不写进 meaning / usage / example，所以词条仍留在「候选词-待研究」，也不能凭它确认；
+ * - 不进提示词：buildSlangContext 只读已确认词条的 meaning / usage；
+ * - 不进给 AI 的公开条目：bridge.js 的 publicSlangEntry 是字段白名单，不含 lastGuess；
+ * - `GET /api/slang` 拒绝 agent token，AI 读不到原始条目。
+ * 管理员在控制台点「采用为含义」只是把它填进编辑框，保存仍由管理员操作。
+ * 研究确认、或管理员填了含义之后清空。
+ */
+function normalizeSlangGuess(raw, clip) {
+  if (!raw || typeof raw !== 'object') return null;
+  const guess = {
+    meaning: clip(raw.meaning, SLANG_FIELD_MAX),
+    usage: clip(raw.usage, SLANG_FIELD_MAX),
+    example: clip(raw.example, SLANG_FIELD_MAX),
+  };
+  if (!guess.meaning && !guess.usage && !guess.example) return null;
+  const at = String(raw.at ?? '');
+  return { ...guess, at: Number.isFinite(Date.parse(at)) ? at : nowIso() };
+}
+
+/** 从一条未确认的研究结果生成 lastGuess；没有任何推测内容时返回 null（不覆盖已有的推测）。 */
+export function slangGuessFromResult(result, at = nowIso()) {
+  const r = result && typeof result === 'object' ? result : {};
+  return normalizeSlangEntry({ content: 'x', lastGuess: { meaning: r.meaning, usage: r.usage, example: r.example, at } }).lastGuess;
 }
 
 /**

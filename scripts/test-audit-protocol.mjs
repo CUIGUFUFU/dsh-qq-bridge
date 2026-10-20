@@ -1,11 +1,12 @@
 // Offline regression tests. No real DSH/QQ endpoints or local credentials are read.
 import assert from 'node:assert/strict';
 import { NodeApiClient } from '../src/dsh-client.js';
+import { fileURLToPath } from 'node:url';
 
 const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
 const originalHome = process.env.DSH_HOME;
-process.env.DSH_HOME = new URL('./.no-real-dsh-home', import.meta.url).pathname;
+process.env.DSH_HOME = fileURLToPath(new URL('./.no-real-dsh-home', import.meta.url)); // fileURLToPath：Windows 上 URL.pathname 是 /C:/…
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const unhandled = [];
 const onUnhandled = (error) => unhandled.push(error);

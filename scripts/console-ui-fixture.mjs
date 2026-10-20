@@ -299,6 +299,9 @@ export function makeFixtureState() {
     },
     roleInjectMax: 6000,
     dshEffort: 'max',
+    dshProvider: 'deepseek-official',
+    dshModel: 'deepseek-flash',
+    dshVision: 'auto',
     whitelist: { allow: { groups: [123456789, 100003], private: [100001] }, deny: { groups: [], private: [] }, ownerQQ: '100001' },
     sessions: [
       { key: 'group:123456789', sessionId: 'demo-community-20260920', owner: false },
@@ -324,6 +327,7 @@ export function makeFixtureState() {
     slangConfig: { enabled: true, extractMinMessages: 10, extractCooldownMs: 300000, inferenceThresholds: [2, 4, 8], injectMax: 8, learnerPreset: 'qq-chat', workspaceTitle: 'QQ 黑话学习', autoResearch: true },
     slang: [
       { id: 'demo-candidate', content: '有被治愈到', meaning: '感到温暖和安慰', status: 'candidate', count: 4, source: 'auto', evidence: [{ sender: '演示群友', text: '今天这张图，有被治愈到。' }], createdAt: timestamp, updatedAt: timestamp },
+      { id: 'demo-guess', content: '示例新词', meaning: '', status: 'candidate', count: 2, source: 'auto', evidence: [{ sender: '演示群友', text: '这也太示例新词了吧。' }], lastGuess: { meaning: '（演示推测）形容事情很离谱', usage: '吐槽时用', example: '', at: timestamp }, createdAt: timestamp, updatedAt: timestamp },
       { id: 'demo-confirmed', content: '绝绝子', meaning: '很好、很棒', usage: '表达赞美', example: '这个设计绝绝子。', status: 'confirmed', count: 12, source: 'manual', createdAt: timestamp, updatedAt: timestamp },
       { id: 'demo-rejected', content: '测试噪声', meaning: '', risk: '演示排除项', status: 'rejected', count: 1, source: 'auto', createdAt: timestamp, updatedAt: timestamp },
     ],
@@ -340,6 +344,27 @@ export function makeFixtureState() {
 }
 
 /** Bind only to loopback. Mutations affect this server's disposable in-memory state. */
+// 离线演示用的 DSH 模型目录（假数据）：两个 DeepSeek 自家模型 + 一个虚构的第三方提供方（含无档位模型）。
+const FIXTURE_EFFORTS = [
+  { id: 'off', name: 'Off', description: '关闭思考' },
+  { id: 'low', name: 'Low', description: 'routine' },
+  { id: 'high', name: 'High', description: 'default balance' },
+  { id: 'max', name: 'Max', description: 'hardest tasks' },
+];
+const FIXTURE_DSH_PROVIDERS = [
+  { id: 'deepseek-official', name: 'DeepSeek', thirdParty: false, models: [
+    { id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', description: '', efforts: FIXTURE_EFFORTS, defaultEffort: 'high', vision: 'yes', priced: true },
+    { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', description: '', efforts: FIXTURE_EFFORTS, defaultEffort: 'high', vision: 'unknown', priced: true },
+  ] },
+  { id: 'example-cloud', name: 'Example Cloud（演示）', thirdParty: true, models: [
+    { id: 'example-chat', name: 'Example Chat', description: '没有思考档位的演示模型', efforts: [], defaultEffort: null, vision: 'unknown', priced: false },
+    { id: 'example-reasoner', name: 'Example Reasoner', description: '', efforts: [{ id: 'minimal', name: 'Minimal' }, { id: 'medium', name: 'Medium' }, { id: 'xhigh', name: 'XHigh' }], defaultEffort: 'medium', vision: 'unknown', priced: false },
+  ] },
+];
+function fixtureDshModel(provider, model) {
+  return FIXTURE_DSH_PROVIDERS.find((p) => p.id === provider)?.models.find((m) => m.id === model) || null;
+}
+
 export async function startConsoleFixture({ port = 0, original = false, htmlPath, logWrites = false } = {}) {
   const file = htmlPath || resolve(projectRoot, original ? 'scripts/fixtures/console.before.html' : 'public/console.html');
   await readFile(file); // Fail early rather than displaying a broken preview.
@@ -435,17 +460,26 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             const preset = url.searchParams.get('preset') === 'qq-chat' ? 'qq-chat' : 'qq-chat-v2';
             return json({ ok: true, backups: [{ file: `${preset}.agent.cordis.yml.fixture`, mtime: Date.parse(timestamp) }] });
           }
-          case '/api/dsh/model': return json({
-            provider: 'deepseek-official',
-            model: 'deepseek-flash',
-            reasoningEffort: state.dshEffort,
-            options: ['low', 'high', 'max'],
-            labels: { low: { name: 'Low', description: 'routine' }, high: { name: 'High', description: 'default balance' }, max: { name: 'Max', description: 'hardest tasks' } },
-            default: 'max',
-            providerDefault: 'high',
-            catalogSource: 'dsh',
-            globalSideEffect: true,
-          });
+          case '/api/dsh/model': {
+            const entry = fixtureDshModel(state.dshProvider, state.dshModel);
+            return json({
+              provider: state.dshProvider,
+              model: state.dshModel,
+              reasoningEffort: state.dshEffort,
+              vision: state.dshVision,
+              visionKnown: entry?.vision || 'unknown',
+              priced: !!entry?.priced,
+              options: (entry?.efforts || []).map((e) => e.id),
+              labels: Object.fromEntries((entry?.efforts || []).map((e) => [e.id, { name: e.name, description: e.description }])),
+              default: 'max',
+              providerDefault: entry?.defaultEffort || null,
+              catalogSource: 'dsh',
+              catalogError: null,
+              providers: FIXTURE_DSH_PROVIDERS,
+              failures: [],
+              globalSideEffect: true,
+            });
+          }
           case '/api/whitelist': return json(state.whitelist);
           case '/api/sessions': return json({ sessions: state.sessions });
           case '/api/pending': return json({ pending: [{ key: 'group:123456789', kind: 'approval', toolName: '演示工具', reason: '等待管理员确认（离线示例）' }] });
@@ -542,6 +576,14 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             return json({ ok: true, restoredFrom: `${preset}.agent.cordis.yml.fixture`, requiresRestart: true });
           }
           case '/api/dsh/effort': state.dshEffort = body.reasoningEffort; return json({ ok: true, reasoningEffort: body.reasoningEffort });
+          case '/api/dsh/model': {
+            const entry = fixtureDshModel(body.provider, body.model);
+            if (!entry) return json({ ok: false, error: `DSH 的模型目录里没有 ${body.provider}/${body.model}` }, 400);
+            const ids = entry.efforts.map((e) => e.id);
+            if (ids.length && body.reasoningEffort && !ids.includes(body.reasoningEffort)) return json({ ok: false, error: `${body.provider}/${body.model} 只支持思考强度 ${ids.join(' / ')}` }, 400);
+            Object.assign(state, { dshProvider: body.provider, dshModel: body.model, dshEffort: ids.length ? (body.reasoningEffort || '') : '', dshVision: body.vision || 'auto' });
+            return json({ ok: true, provider: state.dshProvider, model: state.dshModel, reasoningEffort: state.dshEffort, vision: state.dshVision });
+          }
           case '/api/role-mode': state.roleMode = body.mode; return json({ ok: true });
           case '/api/whitelist': state.whitelist = body; return json({ ok: true });
           case '/api/social': state.social = body; return json({ ok: true });

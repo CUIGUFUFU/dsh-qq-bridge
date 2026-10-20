@@ -28,6 +28,24 @@ import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } fro
 import { hardenDir, manualDirCommand } from './state-acl.mjs';
 import { extractForwardIds, forwardIdFromData, sanitizeForwardId, formatForwardResponse } from './forward.js';
 import { resolvePriceTable } from './model-prices.js';
+import {
+  normalizeEffortId,
+  normalizeVisionSetting,
+  FALLBACK_EFFORTS,
+  createModelCatalogCache,
+  validateModelSelection,
+  resolveSelectModelParams,
+  buildCatalogView,
+  findCatalogModel,
+  catalogEfforts,
+  canSeeImages,
+  knownVision,
+  isPriced,
+  isFirstPartyProvider,
+  selectionNotices,
+  mediaTextParts,
+  mediaTextEntries,
+} from './dsh-model.js';
 import { createTokenLedger } from './token-ledger.js';
 import {
   loadSlang,
@@ -40,6 +58,7 @@ import {
   parseResearchJson,
   createSlangEntry,
   mergeEvidence,
+  slangGuessFromResult,
   SLANG_STATUS,
   SLANG_MAX_ENTRIES
 } from './slang-learner.js';
@@ -569,24 +588,15 @@ function forgetAgentToken(key) {
   CONVERSATION_TOKENS.delete(key);
 }
 
-// 读取 DSH 模型能力的在途 Promise：withTimeout 只做 Promise.race，不会取消底层 RPC，
-// 因此并发刷新会各自留下一个不可取消的请求。这里做去重，同一时刻只发一个。
-let modelCatalogInFlight = null;
 // DSH 思考强度（reasoningEffort）热切换代号。
 // 控制台改强度后递增它，让已在运行的会话在下一条消息重新 selectModel；
 // 放在模块级是为了不依赖 main() 内部声明的执行顺序（避免 TDZ）。
 let modelSelectionEpoch = 0;
-// DeepSeek provider 明确支持的取值（见 dsh-llm-deepseek：其它值会抛 UNSUPPORTED_REASONING_EFFORT）。
-// 'off' 虽然合法（关闭思考），但 QQ 聊天助手依赖思考，控制台不提供该档。
-const REASONING_EFFORT_OPTIONS = ['low', 'high', 'max'];
+// 思考档位：具体模型支持哪些以 DSH 模型目录为准（见 src/dsh-model.js）；
+// 这里只按 DSH 已知的全部档位做初步校验，空值表示「用模型默认」。
+// 'off'（关闭思考）现在也放开，控制台选它时会提示可能影响工具调用和回复质量。
 const REASONING_EFFORT_DEFAULT = 'max';
-function normalizeReasoningEffort(value) {
-  const v = String(value ?? '').trim().toLowerCase();
-  if (!REASONING_EFFORT_OPTIONS.includes(v)) {
-    throw new Error(`思考强度只能是 ${REASONING_EFFORT_OPTIONS.join(' / ')}`);
-  }
-  return v;
-}
+const normalizeReasoningEffort = (value) => normalizeEffortId(value);
 
 // 敏感文本脱敏：把 SENSITIVE_RE 命中的片段替换为 ***，供日志/反馈/活动记录写入前使用。
 // SENSITIVE_RE 未带 g 标志，这里动态补 g 以替换所有命中片段。
@@ -1014,6 +1024,8 @@ function loadConfig() {
     log(`⚠️ config.json 的 dsh.reasoningEffort「${cfg.dsh.reasoningEffort}」非法，已回退 ${REASONING_EFFORT_DEFAULT}（${error?.message ?? error}）`);
     cfg.dsh.reasoningEffort = REASONING_EFFORT_DEFAULT;
   }
+  // 看图能力：auto = 按已知表（未知的模型按不能看图，图片降级成文字）；yes / no = 管理员手动指定。
+  cfg.dsh.vision = normalizeVisionSetting(cfg.dsh.vision);
 
   // 人格卡注入上限（字符）。历史硬编码 6000，现在可配：每条约 4~6k token 的成本护栏。
   cfg.role = { maxInjectChars: ROLE_INJECT_MAX_CHARS_DEFAULT, ...(file.role ?? {}) };
@@ -2316,13 +2328,28 @@ async function main() {
       }
       const output = await waitLearnerTurn(sessionId);
       const results = parseResearchJson(output);
+      // 计数口径必须与实际写库一致：`results.length` 是「解析到的结果条数」，
+      // 而未确认的结果会被跳过、一个字都不写。若这里直接打 results.length，
+      // 「3 条全部未确认」也会打印「已更新 3 条」—— 管理端看起来研究成功了，
+      // 词库却毫无变化，只能反复重送研究。改为分别统计「写入」与「未确认」。
+      let written = 0;
+      let unconfirmed = 0;
       for (const r of results) {
         const entry = slangEntries.find((e) => e.content === r.content);
         if (!entry) continue;
         // 只有明确确认（confirmed: true）的结果才写入解释字段；
         // 不确定/未确认的结果保留原状，允许后续再次研究。
         if (r.confirmed !== true) {
-          log(`黑话研究：${r.content} 未确认，保留候选待后续研究`);
+          unconfirmed += 1;
+          // 未确认的结果仍然不写库（避免把模型的猜测当事实注入提示词），
+          // 但把它的推测打进日志：否则管理端只看到「研究完成」却看不到任何内容，
+          // 无法判断该手填还是该换关键词重研。
+          const guess = String(r.meaning ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+          log(`黑话研究：${r.content} 未确认，保留候选待后续研究${guess ? `（AI 推测：${guess}）` : ''}`);
+          // 推测另存到 lastGuess，只在控制台卡片上显示（不是含义：不进提示词、不进给 AI 的公开条目，
+          // 词条仍在「待研究」）；这次没给推测时保留上一次的。
+          const lastGuess = slangGuessFromResult(r);
+          if (lastGuess) entry.lastGuess = lastGuess;
           continue;
         }
         if (r.meaning) entry.meaning = r.meaning;
@@ -2331,10 +2358,12 @@ async function main() {
         if (r.risk) entry.risk = r.risk;
         if (Array.isArray(r.sources) && r.sources.length) entry.sources = r.sources.map((s) => String(s ?? '').trim()).filter(Boolean).slice(0, 10);
         entry.lastInferenceCount = entry.count;
+        entry.lastGuess = null; // 已经研究确认，推测作废
         entry.updatedAt = new Date().toISOString();
+        written += 1;
       }
       saveSlangStore();
-      log(`黑话研究：已更新 ${results.length} 条候选解释`);
+      log(`黑话研究：写入 ${written} 条候选解释（解析 ${results.length} 条，未确认 ${unconfirmed} 条）`);
     } catch (error) {
       if (/会话|session|not found|404/i.test(String(error?.message ?? error))) {
         invalidateSlangLearnerSession();
@@ -2479,6 +2508,13 @@ async function main() {
       return api.callUnary('session.models', {});
     }
   }
+  // 模型目录缓存（60 秒 TTL、并发去重、3 秒超时）：控制台下拉、保存校验、会话 selectModel 共用。
+  const modelCatalogCache = createModelCatalogCache({
+    fetchCatalog: async () => unwrap(await fetchModelCatalog(), 'session.modelCatalog'),
+  });
+  // 当前模型能不能看图（决定 QQ 图片是交给模型还是降级成文字占位）。
+  const modelCanSeeImages = () => canSeeImages(cfg.dsh ?? {});
+  const currentModelLabel = () => `${cfg.dsh?.provider || 'deepseek-official'}/${cfg.dsh?.model || 'deepseek-flash'}`;
   const collectors = new Map(); // sessionId -> turn collector
   const sendToolSucceededSessions = new Set(); // sessionId：当前 turn 内 MCP 发送类工具至少成功一次
   const v2TurnStartAt = new Map(); // sessionId -> timestamp：reserved2 turn 开始时间，用于判断是否“无行动”
@@ -3005,6 +3041,8 @@ async function main() {
   function forgetConversationCaches(key) {
     lastSendFailed.delete(key);
     activeWaits.delete(key);
+    // 等待租约按归一后的 key 记账（group:0123 与 group:123 是同一个会话），两种写法都要清
+    activeWaits.delete(canonicalV2Key(key) ?? key);
     queuedHintAt.delete(key);
     slangSubmitTimes.delete(key);
     feedbackTimes.delete(key);
@@ -4146,6 +4184,7 @@ async function main() {
             if (entry.status !== SLANG_STATUS.CANDIDATE) { skippedCount++; skipped.push({ id, content: entry.content, reason: '不是候选' }); continue; }
             if (!entry.meaning || !String(entry.meaning).trim()) { skippedCount++; skipped.push({ id, content: entry.content, reason: '缺少含义' }); continue; }
             entry.status = SLANG_STATUS.CONFIRMED;
+            entry.lastGuess = null;
             entry.updatedAt = new Date().toISOString();
             confirmedCount++;
           }
@@ -4192,6 +4231,8 @@ async function main() {
           if (body.sources !== undefined) entry.sources = Array.isArray(body.sources) ? body.sources.map(String).filter(Boolean).slice(0, 10) : [];
           if (body.status !== undefined && [SLANG_STATUS.CANDIDATE, SLANG_STATUS.CONFIRMED, SLANG_STATUS.REJECTED].includes(body.status)) entry.status = body.status;
           if (!entry.content) { sendJson({ ok: false, error: '黑话内容不能为空' }, 400); return; }
+          // 管理员填了含义（包括「采用为含义」后改好保存），AI 推测就作废了
+          if (String(entry.meaning ?? '').trim()) entry.lastGuess = null;
           entry.updatedAt = new Date().toISOString();
           slangEntries[idx] = entry;
           saveSlangStore();
@@ -4215,6 +4256,7 @@ async function main() {
             return;
           }
           entry.status = SLANG_STATUS.CONFIRMED;
+          entry.lastGuess = null;
           entry.updatedAt = new Date().toISOString();
           saveSlangStore();
           log(`控制台：确认黑话「${entry.content}」`);
@@ -4380,55 +4422,96 @@ async function main() {
         if (req.method === 'GET' && url.pathname === '/api/dsh/model') {
           const provider = String(cfg.dsh?.provider || 'deepseek-official');
           const model = String(cfg.dsh?.model || 'deepseek-flash');
-          // 档位优先取 DSH 实际公布的能力（DSH 换档位词汇或换 provider 时自动跟随），失败退回内置白名单。
-          let options = REASONING_EFFORT_OPTIONS.slice();
+          const reasoningEffort = String(cfg.dsh?.reasoningEffort ?? '');
+          const vision = normalizeVisionSetting(cfg.dsh?.vision);
+          // 选项全部取自 DSH 的模型目录（不另维护硬编码清单）；目录取不到时退化到「当前值 + 内置档位」，
+          // 控制台标注「目录不可用」。
+          const got = await modelCatalogCache.get({ force: url.searchParams.get('refresh') === '1' });
+          let options = FALLBACK_EFFORTS.slice();
           let labels = {};
           let providerDefault = null;
           let catalogSource = 'fallback';
-          try {
-            if (!modelCatalogInFlight) {
-              modelCatalogInFlight = withTimeout(fetchModelCatalog(), 3000, 'session/modelCatalog')
-                .finally(() => { modelCatalogInFlight = null; });
-            }
-            const catalog = unwrap(await modelCatalogInFlight, 'session.modelCatalog');
-            const group = (catalog?.groups ?? []).find((g) => g?.id === provider);
-            const entry = (group?.models ?? []).find((m) => m?.id === model);
-            const efforts = entry?.reasoning?.efforts ?? [];
-            const advertised = efforts.map((e) => String(e?.id ?? '')).filter((id) => REASONING_EFFORT_OPTIONS.includes(id));
-            if (advertised.length) {
-              options = advertised;
-              labels = Object.fromEntries(efforts.map((e) => [String(e.id), { name: e.name ?? '', description: e.description ?? '' }]));
-              providerDefault = entry.reasoning.defaultEffort ?? null;
+          let view = { providers: [], failures: [] };
+          let catalogError = null;
+          if (got.ok) {
+            view = buildCatalogView(got.catalog, { priceTable });
+            const { entry } = findCatalogModel(got.catalog, provider, model);
+            if (entry) {
+              options = catalogEfforts(entry);
+              labels = Object.fromEntries((entry.reasoning?.efforts ?? []).map((e) => [String(e.id), { name: e.name ?? '', description: e.description ?? '' }]));
+              providerDefault = entry.reasoning?.defaultEffort ?? null;
               catalogSource = 'dsh';
+            } else {
+              catalogError = `DSH 的模型目录里没有当前配置的 ${provider}/${model}`;
             }
-          } catch (error) {
+          } else {
+            catalogError = got.error;
             // 同一条失败原因只记一次：控制台每次刷新都会打这条接口，否则日志会被刷爆。
-            const reason = String(error?.message ?? error);
-            if (!modelCatalogErrorLogged.has(reason)) {
-              modelCatalogErrorLogged.add(reason);
-              log(`读取 DSH 模型能力失败，思考强度暂用内置清单：${reason}`);
+            if (!modelCatalogErrorLogged.has(got.error)) {
+              modelCatalogErrorLogged.add(got.error);
+              log(`读取 DSH 模型目录失败，控制台暂用当前配置和内置档位：${got.error}`);
             }
           }
+          if (catalogSource === 'fallback' && reasoningEffort && !options.includes(reasoningEffort)) options.push(reasoningEffort);
+          const priced = isPriced(provider, model, priceTable);
           sendJson({
             provider,
             model,
-            reasoningEffort: String(cfg.dsh?.reasoningEffort || REASONING_EFFORT_DEFAULT),
+            reasoningEffort,
+            vision,
+            visionKnown: knownVision(provider, model),
+            canSeeImages: modelCanSeeImages(),
+            thirdParty: !isFirstPartyProvider(provider),
+            priced,
+            notices: selectionNotices({ provider, model, reasoningEffort, vision, priced }),
             options,
             labels,
             default: REASONING_EFFORT_DEFAULT,
             providerDefault,
             catalogSource,
+            catalogError,
+            providers: view.providers,
+            failures: view.failures,
             // selectModel 会同时写会话级与 DSH 全局默认（~/.dsh/settings.yaml 的 agent-default-model），
             // 控制台要把这点明确告诉管理员，避免「只想调 QQ 助手却改了 Web GUI 新会话默认」的意外。
             globalSideEffect: true,
           });
           return;
         }
+        // 保存提供方 / 模型 / 思考强度 / 看图能力。只有控制台能调（agent token 默认拒绝，见上面的白名单），
+        // QQ 里的 AI 和私聊管理通道都改不了。校验以 DSH 模型目录为准：目录取不到就拒绝保存（不能校验就不写）。
+        if (req.method === 'POST' && url.pathname === '/api/dsh/model') {
+          const body = await readBody();
+          const got = await modelCatalogCache.get({ force: true });
+          if (!got.ok) { sendJson({ ok: false, error: `读取 DSH 模型目录失败，无法校验，未保存：${got.error}` }, 503); return; }
+          let selection;
+          try { selection = validateModelSelection(got.catalog, { ...body, vision: body.vision ?? cfg.dsh?.vision }); }
+          catch (error) { sendJson({ ok: false, error: error?.message ?? '选择无效' }, 400); return; }
+          const configFile = path.join(ROOT, 'config.json');
+          // fail-fast：配置损坏时直接 500，绝不回写（与白名单接口同语义）
+          const file = readConfigObject(configFile);
+          file.dsh = { ...(file.dsh ?? {}), ...selection };
+          atomicWriteJson(configFile, file);
+          cfg.dsh = { ...(cfg.dsh ?? {}), ...selection };
+          // 递增代号：已在运行的会话在下一条消息会重新 selectModel（无需重启桥接或 DSH）
+          modelSelectionEpoch += 1;
+          const priced = isPriced(selection.provider, selection.model, priceTable);
+          log(`控制台：DSH 模型已设为 ${selection.provider}/${selection.model}（思考强度 ${selection.reasoningEffort || '模型默认'}，看图 ${selection.vision}），对已有会话于下一条消息生效`);
+          sendJson({ ok: true, ...selection, canSeeImages: modelCanSeeImages(), priced, notices: selectionNotices({ ...selection, priced }) });
+          return;
+        }
+        // 旧接口：只改思考强度。保留给旧版控制台；目录可用时同样按当前模型公布的档位校验。
         if (req.method === 'POST' && url.pathname === '/api/dsh/effort') {
           const body = await readBody();
           let effort;
           try { effort = normalizeReasoningEffort(body.reasoningEffort); }
           catch (error) { sendJson({ ok: false, error: error?.message ?? '思考强度无效' }, 400); return; }
+          const got = await modelCatalogCache.get();
+          if (got.ok) {
+            try {
+              effort = validateModelSelection(got.catalog, { provider: cfg.dsh?.provider, model: cfg.dsh?.model, reasoningEffort: effort, vision: cfg.dsh?.vision }).reasoningEffort;
+            } catch (error) { sendJson({ ok: false, error: error?.message ?? '思考强度无效' }, 400); return; }
+          }
           const configFile = path.join(ROOT, 'config.json');
           // fail-fast：配置损坏时直接 500，绝不回写（与白名单接口同语义）
           const file = readConfigObject(configFile);
@@ -4437,7 +4520,7 @@ async function main() {
           cfg.dsh = { ...(cfg.dsh ?? {}), reasoningEffort: effort };
           // 递增代号：已在运行的会话在下一条消息会重新 selectModel（无需重启桥接或 DSH）
           modelSelectionEpoch += 1;
-          log(`控制台：DSH 思考强度已设为 ${effort}（对已有会话于下一条消息生效）`);
+          log(`控制台：DSH 思考强度已设为 ${effort || '模型默认'}（对已有会话于下一条消息生效）`);
           sendJson({ ok: true, reasoningEffort: effort });
           return;
         }
@@ -4912,6 +4995,7 @@ async function main() {
             forgetAgentToken(key);
             socialV2.conversations.delete(key);
             seenForwardIds.delete(key);
+            forgetConversationCaches(key); // 含 qq_wait_for_messages 的等待租约
           }
           saveState();
           pendingWakeKeys.clear();
@@ -5765,6 +5849,7 @@ async function main() {
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('getStickerImage')) { sendJson({ ok: false, error: '工具未启用：qq_get_sticker_image' }, 403); return; }
+          if (req.headers['x-agent-token'] && !modelCanSeeImages()) { sendJson({ ok: false, error: `当前模型 ${currentModelLabel()} 不能看图，表情图片不返回；请按表情的备注和标签使用` }, 409); return; }
           try {
             const entry = await getStickerImageData(stickerId);
             const fetched = await safeFetchBuffer(entry.url, MAX_MEDIA_BYTES);
@@ -5798,6 +5883,7 @@ async function main() {
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('getSelfImage')) { sendJson({ ok: false, error: '工具未启用：qq_get_self_image' }, 403); return; }
+          if (req.headers['x-agent-token'] && !modelCanSeeImages()) { sendJson({ ok: false, error: `当前模型 ${currentModelLabel()} 不能看图，形象图片不返回` }, 409); return; }
           const selfPath = path.join(ROOT, 'assets', 'deepseek娘.png');
           try {
             if (!fs.existsSync(selfPath)) { sendJson({ ok: false, error: '未找到 AI 形象图片 assets/deepseek娘.png' }, 404); return; }
@@ -7567,6 +7653,9 @@ async function main() {
           forgetAgentToken(key);
           socialV2.conversations.delete(key);
           seenForwardIds.delete(key);
+          // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
+          // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
+          forgetConversationCaches(key);
           saveSocialV2State();
           saveState();
           // 归档只隐藏会话，不终止 DSH 侧排队的工作；先清队列并取消当前回合。
@@ -8252,6 +8341,8 @@ async function main() {
   }
 
   async function resolveMediaList(mediaList) {
+    // 当前模型不能看图（或未知）：不下载图片，直接换成文字占位，避免整条消息被 DSH 拒绝
+    if (!modelCanSeeImages()) return mediaTextParts(Array.isArray(mediaList) ? mediaList.slice(0, MAX_MEDIA_COUNT) : [], currentModelLabel());
     const parts = [];
     let index = 0;
     let totalBytes = 0;
@@ -8297,6 +8388,8 @@ async function main() {
   }
 
   async function fetchMediaData(mediaList) {
+    // 工具查询图片同理：不能看图时只返回文字条目（不带 data），MCP 端会显示成文字
+    if (!modelCanSeeImages()) return mediaTextEntries(Array.isArray(mediaList) ? mediaList.slice(0, MAX_MEDIA_COUNT) : [], currentModelLabel());
     const out = [];
     let index = 0;
     let totalBytes = 0;
@@ -8516,15 +8609,18 @@ async function main() {
   // 返回 'applied' | 'not-found' | 'failed'。
   // 'not-found' 表示 DSH 侧会话已经不存在（DSH 重启、异常退出、归档竞态），
   // 本地映射已失效，调用方必须退役重建，否则每条消息都会对着一个不存在的会话重试。
+  const modelParamWarnings = new Set(); // 同一条档位修正提示只记一次
   async function ensureChatModel(sessionId) {
     if (modelAppliedSessions.get(sessionId) === modelSelectionEpoch) return 'applied';
-    const provider = String(cfg.dsh?.provider || 'deepseek-official');
-    const model = String(cfg.dsh?.model || 'deepseek-flash');
-    const effort = String(cfg.dsh?.reasoningEffort || REASONING_EFFORT_DEFAULT);
+    // 按 DSH 模型目录修正参数：无档位模型不带 reasoningEffort、不被支持的档位交给模型默认。
+    // 目录取不到（超时 / 旧 DSH）时按配置原样传，不阻塞聊天。
+    const got = await modelCatalogCache.get();
+    const { params, warning } = resolveSelectModelParams(cfg.dsh ?? {}, got.ok ? got.catalog : null);
+    if (warning && !modelParamWarnings.has(warning)) { modelParamWarnings.add(warning); log(`⚠️ ${warning}`); }
     let lastError = null;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
-        const result = unwrap(await api.sessions.selectModel({ sessionId, provider, model, reasoningEffort: effort }), 'session.selectModel');
+        const result = unwrap(await api.sessions.selectModel({ sessionId, ...params }), 'session.selectModel');
         modelAppliedSessions.set(sessionId, modelSelectionEpoch);
         log(`已设置会话模型 ${sessionId} -> ${result.selected.provider}/${result.selected.model} (${result.selected.reasoningEffort ?? '默认'})`);
         return 'applied';
@@ -11538,6 +11634,9 @@ async function main() {
           forgetAgentToken(key);
           socialV2.conversations.delete(key);
           seenForwardIds.delete(key);
+          // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
+          // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
+          forgetConversationCaches(key);
           saveSocialV2State();
           saveState();
           // 与 retireSession 一致：先终止 DSH 侧排队的工作，再归档（归档只隐藏会话）。
