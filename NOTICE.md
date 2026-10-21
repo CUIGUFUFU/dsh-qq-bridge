@@ -1,6 +1,20 @@
 # 来源与授权声明（NOTICE）
 
-## 本项目
+## 本 fork（CUIGUFUFU/dsh-qq-bridge）
+
+本仓库 fork 自 [h-D-ACE/dsh-qq](https://github.com/h-D-ACE/dsh-qq)（qq-bridge-enhanced v1.0.2，基线提交 `f19aaee`），
+上游链条为 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) → h-D-ACE/dsh-qq → 本仓库。
+三者均适用 MIT 许可；本仓库保留全部上游版权声明与 [LICENSE](LICENSE) 全文，修改部分同样以 MIT 发布。
+
+本次修改（v1.0.2 之上，仅适配 DSH 桌面版，未改动业务逻辑）：
+
+- `src/lib/dsh-endpoint.mjs`：进程名识别加入 `DSH Desktop.exe`；`detectDshDesktop()` 增加 `<harness>/logs` 旁置目录回退；
+  新增 `portsFromHarnessLog()` 从 `harness.log` 的 `dsh web: http://127.0.0.1:<port>` 行取实际监听端口（桌面版每次随机端口）。
+- `src/dsh-client.js`：`resolveDshHome()` 在 `~/.dsh` 不存在时回退到 `%APPDATA%/dsh-desktop/harness`（桌面版凭证位置）。
+- `src/bridge.js`、`src/web-search.js`：改用 `resolveDshHome()`，不再各自写死 `~/.dsh`。
+- `scripts/test-dsh-endpoint.mjs`：补充 DSH Desktop 进程名、日志端口发现、桌面版目录识别的回归用例。
+
+## 本项目（上游 h-D-ACE/dsh-qq 的原文，保留）
 
 qq-bridge-enhanced 是 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge)（MIT 许可，
 Copyright (c) 2026 Derpyu520 and qq-bridge / QSH contributors）的二次开发版本，基线为上游 `v0.2.0-r3`

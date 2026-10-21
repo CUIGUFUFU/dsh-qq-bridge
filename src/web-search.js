@@ -81,10 +81,9 @@ export function loadSearchConfig(root) {
   };
 }
 
-/** DSH home：与 dsh-client 的判定保持一致（`DSH_HOME` 优先）。 */
-export function resolveDshHome() {
-  return process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
-}
+/** DSH home：复用 dsh-client 的判定（含 DSH 桌面版 Electron userData 下的 harness 目录）。 */
+import { resolveDshHome } from './dsh-client.js';
+export { resolveDshHome };
 
 /**
  * 从 DSH 的凭据文件里取 key。

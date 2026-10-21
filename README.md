@@ -2,6 +2,10 @@
 
 **支持系统：Windows · macOS · Linux**（qq-bridge-enhanced v1.0.2）
 
+> 📌 本仓库是 [CUIGUFUFU/dsh-qq-bridge](https://github.com/CUIGUFUFU/dsh-qq-bridge)：
+> fork 自 [h-D-ACE/dsh-qq](https://github.com/h-D-ACE/dsh-qq)（其二次开发自 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge)），
+> 沿用上游 MIT 许可，并在其基础上做了 DSH 桌面版适配。来源、授权与本次修改范围见 [NOTICE.md](NOTICE.md)。
+
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
 > 🗂️ 文档索引见 **[docs/README.md](docs/README.md)**；仓库目录/脚本命名约定见 **[docs/FOLDER_MAP.md](docs/FOLDER_MAP.md)**。

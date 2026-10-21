@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
-import { dshBaseUrlCandidates, detectDshDesktop, resolveDshBaseUrl } from '../src/lib/dsh-endpoint.mjs';
+import { dshBaseUrlCandidates, detectDshDesktop, listDesktopListenPorts, parseLsofPorts, parseNetstatPorts, parseTasklistPids, portsFromHarnessLog, resolveDshBaseUrl } from '../src/lib/dsh-endpoint.mjs';
 
 function fakeHome({ desktop }) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-dshhome-'));
@@ -56,7 +56,7 @@ test('macOS：没有 dsh-runtimes 时按桌面版 App 包的 Info.plist 识别�
 
 // ── DSH 桌面版 0.2.1：随机端口的动态发现 ────────────────────────────────────────
 import http from 'node:http';
-import { parseLsofPorts, parseNetstatPorts, parseTasklistPids, listDesktopListenPorts, looksLikeDsh } from '../src/lib/dsh-endpoint.mjs';
+import { looksLikeDsh } from '../src/lib/dsh-endpoint.mjs';
 import { NodeApiClient } from '../src/dsh-client.js';
 
 test('解析：lsof / netstat / tasklist 只取 DSH 进程的回环监听端口', async () => {
@@ -65,11 +65,26 @@ test('解析：lsof / netstat / tasklist 只取 DSH 进程的回环监听端口'
   const netstat = '  TCP    127.0.0.1:61001        0.0.0.0:0              LISTENING       4321\n  TCP    127.0.0.1:3100         0.0.0.0:0              LISTENING       999\n  TCP    0.0.0.0:61002          0.0.0.0:0              LISTENING       4321\n';
   assert.deepEqual(parseNetstatPorts(netstat, ['4321']), [61001], '只要该 PID 的回环端口');
   // 注入 exec：mac 走 lsof，win 先 tasklist 再 netstat，其它平台不查
-  const mac = await listDesktopListenPorts({ platform: 'darwin', exec: async (f) => (f.endsWith('lsof') ? 'n127.0.0.1:57764\n' : '') });
+  // env 指向不存在的 DSH_HOME，免得读到本机真实的 harness.log 端口
+  const isoEnv = { DSH_HOME: path.join(os.tmpdir(), 'no-such-dsh-home-xyz') };
+  const mac = await listDesktopListenPorts({ platform: 'darwin', env: isoEnv, exec: async (f) => (f.endsWith('lsof') ? 'n127.0.0.1:57764\n' : '') });
   assert.deepEqual(mac, [57764]);
-  const win = await listDesktopListenPorts({ platform: 'win32', exec: async (f) => (f.endsWith('tasklist.exe') ? '"DeepSeek Harness.exe","4321"\n' : netstat) });
+  const win = await listDesktopListenPorts({ platform: 'win32', env: isoEnv, exec: async (f) => (f.endsWith('tasklist.exe') ? '"DeepSeek Harness.exe","4321"\n' : netstat) });
   assert.deepEqual(win, [61001]);
-  assert.deepEqual(await listDesktopListenPorts({ platform: 'linux', exec: async () => 'n127.0.0.1:1\n' }), []);
+  // 新版 DSH Desktop 的进程名是 DSH Desktop.exe，老正则认不出来
+  assert.deepEqual(parseTasklistPids('"DSH Desktop.exe","7788","Console","1","1 K"\n"node.exe","9","Console","1","1 K"\n'), ['7788']);
+  const winNew = await listDesktopListenPorts({ platform: 'win32', env: isoEnv, exec: async (f) => (f.endsWith('tasklist.exe') ? '"DSH Desktop.exe","4321"\n' : netstat) });
+  assert.deepEqual(winNew, [61001], '新版 exe 名也要认');
+  // 进程名对不上时，用 DSH 自己写进 logs/harness.log 的端口兜底（只取最后一条）
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-dshlog-'));
+  fs.mkdirSync(path.join(home, 'logs'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'logs', 'harness.log'), 'dsh web: http://127.0.0.1:1111/?token=a\ndsh web: http://127.0.0.1:2222/?token=b\n');
+  const logEnv = { DSH_HOME: path.join(home, 'harness') };
+  assert.deepEqual(portsFromHarnessLog(logEnv), [2222]);
+  assert.equal(detectDshDesktop(logEnv), 'desktop', 'harness/ 同级有 logs/ 就认作桌面版');
+  const winLog = await listDesktopListenPorts({ platform: 'win32', env: logEnv, exec: async (f) => (f.endsWith('tasklist.exe') ? '"other.exe","1"\n' : '') });
+  assert.deepEqual(winLog, [2222]);
+  assert.deepEqual(await listDesktopListenPorts({ platform: 'linux', env: isoEnv, exec: async () => 'n127.0.0.1:1\n' }), []);
 });
 
 test('特征确认：只认 DSH 的 401 提示文字；别的服务（200 / 其它 401）不认', async () => {

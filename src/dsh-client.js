@@ -17,7 +17,26 @@ import { AbstractApiClient } from '@deepseek-ai/dsh-host-apiproxy/client';
 
 /** DSH home：凭据文件与（历史）启动日志都在这里。 */
 export function resolveDshHome() {
-  return process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
+  const fromEnv = process.env.DSH_HOME;
+  if (fromEnv) return fromEnv;
+  const classic = path.join(os.homedir(), '.dsh');
+  try { if (fs.existsSync(path.join(classic, '.credentials.yaml'))) return classic; } catch {}
+  // DSH 桌面版（Electron 打包）把数据目录放在 Electron userData 下：<userData>/harness。
+  // 它既不读 ~/.dsh 也不设置外层 DSH_HOME，但 .credentials.yaml（浏览器会话签名密钥）
+  // 只在那里 —— 找不到它就只能退回到拿不到 launch token 的死路（日志里的 token 是旧进程的）。
+  const homes = [];
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    homes.push(path.join(process.env.APPDATA, 'dsh-desktop', 'harness'));
+  } else if (process.platform === 'darwin') {
+    homes.push(path.join(os.homedir(), 'Library', 'Application Support', 'dsh-desktop', 'harness'));
+  } else {
+    const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+    homes.push(path.join(configHome, 'dsh-desktop', 'harness'));
+  }
+  for (const home of homes) {
+    try { if (fs.existsSync(path.join(home, '.credentials.yaml'))) return home; } catch {}
+  }
+  return classic;
 }
 
 /**

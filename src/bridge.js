@@ -16,7 +16,7 @@ import { extractPresetPrefix, presetPromptBlockers, presetPromptWarnings, render
 import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
-import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from './dsh-client.js';
+import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken, resolveDshHome } from './dsh-client.js';
 import { mdToPlain, splitForQQ, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
@@ -447,7 +447,9 @@ function presetSourceYaml(name) {
 }
 
 function dshHomeDir() {
-  return process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
+  // 与 dsh-client.resolveDshHome 一致：DSH 桌面版的数据目录在 Electron userData 下
+  // （<userData>/harness），不能假设 ~/.dsh。桥接装 preset、读凭据都靠它。
+  return resolveDshHome();
 }
 
 function installedPresetYaml(name) {

@@ -39,6 +39,13 @@ export function detectDshDesktop(env = process.env, { platform = process.platfor
       } catch {}
     }
   } catch {}
+  // DSH Desktop（Windows 新版打包，资源在 resources/app.asar，exe 名 DSH Desktop.exe）不写
+  // dsh-runtimes：它的 DSH_HOME 是 %APPDATA%/dsh-desktop/harness，同级有 logs/ 目录。
+  // 认不出来时候选顺序会先试 3080，多绕一轮随机端口发现。
+  try {
+    const home = dshHomeDir(env);
+    if (path.basename(home) === 'harness' && fs.existsSync(path.join(path.dirname(home), 'logs'))) return 'desktop';
+  } catch {}
   if (platform === 'darwin') {
     try {
       const app = env.DSH_DESKTOP_APP || '/Applications/DeepSeek Harness.app';
@@ -102,10 +109,30 @@ export function parseNetstatPorts(text, pids) {
 export function parseTasklistPids(text) {
   const out = [];
   for (const line of String(text ?? '').split(/\r?\n/)) {
-    const m = /^"(DeepSeek Harness[^"]*\.exe)","(\d+)"/i.exec(line.trim());
+    // 旧安装包是 DeepSeek Harness.exe；新版 DSH Desktop 的进程名是 DSH Desktop.exe，两个都要认。
+    const m = /^"(DeepSeek Harness[^"]*|DSH Desktop[^"]*)\.exe","(\d+)"/i.exec(line.trim());
     if (m) out.push(m[2]);
   }
   return out;
+}
+
+/**
+ * 从 DSH Desktop 的 logs/harness.log 里读最近一次公布的 Web 端口。
+ *
+ * 兜底用：当 netstat/tasklist 取不到监听端口（权限、进程名差异、Harness 跑在别的可执行文件里）时，
+ * 日志里那行 `dsh web: http://127.0.0.1:<port>/?token=…` 是 DSH 自己写下的权威地址。
+ */
+export function portsFromHarnessLog(env = process.env) {
+  try {
+    const log = path.join(path.dirname(dshHomeDir(env)), 'logs', 'harness.log');
+    const text = fs.readFileSync(log, 'utf8');
+    const out = [];
+    for (const m of text.matchAll(/dsh web: http:\/\/127\.0\.0\.1:(\d{1,5})/g)) out.push(Number(m[1]));
+    // 一次启动会多行重放旧端口；只留最后一条。
+    return out.length ? [out[out.length - 1]] : [];
+  } catch {
+    return [];
+  }
 }
 
 // 控制中心每 2.5 秒刷新一次状态：默认实现缓存 10 秒，避免频繁起 lsof / netstat 进程。
@@ -113,14 +140,14 @@ let portCache = { at: 0, ports: [] };
 const PORT_CACHE_MS = 10_000;
 
 /** DSH 桌面版进程正在监听的回环端口（取不到返回 []）。只读系统信息，不碰 DSH 的任何文件。 */
-export async function listDesktopListenPorts({ platform = process.platform, exec = null, timeoutMs = 3000 } = {}) {
+export async function listDesktopListenPorts({ platform = process.platform, exec = null, timeoutMs = 3000, env = process.env } = {}) {
   if (!exec && Date.now() - portCache.at < PORT_CACHE_MS) return portCache.ports;
-  const ports = await listDesktopListenPortsUncached({ platform, exec: exec ?? run, timeoutMs });
+  const ports = await listDesktopListenPortsUncached({ platform, exec: exec ?? run, timeoutMs, env });
   if (!exec) portCache = { at: Date.now(), ports };
   return ports;
 }
 
-async function listDesktopListenPortsUncached({ platform, exec, timeoutMs }) {
+async function listDesktopListenPortsUncached({ platform, exec, timeoutMs, env = process.env }) {
   try {
     if (platform === 'darwin') {
       return parseLsofPorts(await exec('/usr/sbin/lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-a', '-c', 'DeepSeek', '-Fn'], timeoutMs));
@@ -128,8 +155,12 @@ async function listDesktopListenPortsUncached({ platform, exec, timeoutMs }) {
     if (platform === 'win32') {
       const sys32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
       const pids = parseTasklistPids(await exec(path.join(sys32, 'tasklist.exe'), ['/FO', 'CSV', '/NH'], timeoutMs));
-      if (!pids.length) return [];
-      return parseNetstatPorts(await exec(path.join(sys32, 'netstat.exe'), ['-ano', '-p', 'TCP'], timeoutMs), pids);
+      const ports = pids.length
+        ? parseNetstatPorts(await exec(path.join(sys32, 'netstat.exe'), ['-ano', '-p', 'TCP'], timeoutMs), pids)
+        : [];
+      // 进程名对不上或 netstat 没权限时，用 DSH 自己写进日志的端口兜底（仍然要经过 401 特征确认）。
+      for (const port of portsFromHarnessLog(env)) if (!ports.includes(port)) ports.push(port);
+      return ports;
     }
   } catch {}
   return [];
