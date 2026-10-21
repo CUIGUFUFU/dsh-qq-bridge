@@ -27,6 +27,25 @@ import { AUDIO_EXTS, cleanupTemp, describeAudio, formatBytes, formatDuration, in
 import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } from './snowluma-conn.js';
 import { hardenDir, manualDirCommand } from './state-acl.mjs';
 import { extractForwardIds, forwardIdFromData, sanitizeForwardId, formatForwardResponse } from './forward.js';
+import {
+  createSlowFetchCache,
+  pendingReplyText,
+  mergeForwardIds,
+  SLOW_FETCH_TIMEOUT_MS,
+  REPLY_INGEST_WAIT_MS,
+  REPLY_TOOL_WAIT_MS,
+  FORWARD_MAIN_WAIT_MS,
+  FORWARD_NESTED_WAIT_MS,
+} from './quote-forward.js';
+import {
+  isHibernatablePolicy,
+  normalizeDormant,
+  dormantDecision,
+  createOwnerTranscript,
+  buildOwnerHandover,
+  buildGroupResumeNote,
+  DORMANT_MAX_MS,
+} from './mode-handover.js';
 import { resolvePriceTable } from './model-prices.js';
 import {
   normalizeEffortId,
@@ -1093,7 +1112,7 @@ function loadState() {
   try {
     raw = fs.readFileSync(STATE_FILE, 'utf8');
   } catch (error) {
-    state = { sessions: {}, sessionPolicies: {} };
+    state = { sessions: {}, sessionPolicies: {}, dormantSessions: {} };
     if (error?.code !== 'ENOENT') {
       stateWritable = false;
       log(`⚠️ sessions.json 读取失败，已降级为「只读不写」（不会覆盖原文件）：${error?.message ?? error}`);
@@ -1106,7 +1125,7 @@ function loadState() {
       const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
       loaded = JSON.parse(text);
     } catch (error) {
-      state = { sessions: {}, sessionPolicies: {} };
+      state = { sessions: {}, sessionPolicies: {}, dormantSessions: {} };
       stateWritable = false;
       log(`⚠️ sessions.json 内容损坏，已降级为「只读不写」（不会覆盖原文件，请先备份再修复）：${error?.message ?? error}`);
       return;
@@ -1115,6 +1134,8 @@ function loadState() {
   if (loaded && loaded.sessions && typeof loaded.sessions === 'object') state = loaded;
   else state = { sessions: {} };
   if (!state.sessionPolicies || typeof state.sessionPolicies !== 'object' || Array.isArray(state.sessionPolicies)) state.sessionPolicies = {};
+  // 模式切换期间休眠的聊天会话（见 src/mode-handover.js）；脏数据丢弃
+  state.dormantSessions = normalizeDormant(state.dormantSessions);
 }
 function saveState() {
   // 统一走原子写：固定 `.tmp` 名 + 无 mode 的手写版本会在外部进程（杀软/备份）
@@ -1342,7 +1363,10 @@ async function segmentsToText(segments, options = {}) {
         if (resolveReply) {
           try {
             const info = await resolveReply(String(d.id));
-            if (info?.sender || info?.text) {
+            if (info?.pending) {
+              // 原消息还在后台取（例如引用了一条较早的合并转发，NapCat 要一分多钟）：先放占位，不卡住这条消息
+              replyText = pendingReplyText(d.id);
+            } else if (info?.sender || info?.text) {
               const parts = [];
               if (info.sender) parts.push(info.sender);
               if (info.text) parts.push(info.text);
@@ -2783,6 +2807,11 @@ async function main() {
     applyRuntimeModeTransition(fromMode, mode);
     currentMode = mode;
     currentLevel = mode === 'closed-agent' ? level : 'L0';
+    if (mode === 'closed-agent') lastAgentLevel = currentLevel;
+    // owner 的会话会因此换新（或稍后从休眠恢复，那时会改成「恢复」交接）：下一条发给它的消息带上私聊交接
+    if (fromMode !== mode || fromLevel !== currentLevel) {
+      pendingHandover.set(ownerKeyOf(), { resumed: false, from: { mode: fromMode, level: fromLevel }, to: { mode, level: currentLevel } });
+    }
     // 离开 closed-agent 或降低级别：无条件退役 owner 的运维会话、作废它的全部审批。
     // 不能只靠 reconcileSessionPolicies —— 它在 DSH preset 清单未知时会跳过判定（见其注释），
     // 那样 /panic 之后旧的高权限回合可能还在跑，审批也还能被「通过」。
@@ -3051,8 +3080,14 @@ async function main() {
     markReadCalledKeys.delete(key);
   }
 
-  function retireSession(key) {
+  function retireSession(key, { hibernate = false } = {}) {
     const sessionId = state.sessions[key];
+    // 休眠：只对从没挂过本地工具的聊天会话（非 closed-agent 建的）。高权限会话永远走归档。
+    const toDormant = hibernate && !!sessionId && isHibernatablePolicy(state.sessionPolicies[key]);
+    if (toDormant) {
+      if (state.dormantSessions[key] && state.dormantSessions[key].sessionId !== sessionId) archiveDormantSession(key);
+      state.dormantSessions[key] = { sessionId, policy: state.sessionPolicies[key], dormantAt: Date.now() };
+    }
     delete state.sessions[key];
     delete state.sessionPolicies[key];
     // 按 key 记账的内存态在**有映射和无映射时都要清**：一条被移出白名单、
@@ -3088,13 +3123,100 @@ async function main() {
       // 保留旧 token 在脱敏集合中，但撤销它的调用权限。
       st.agentToken = crypto.randomBytes(24).toString('hex');
       rememberAgentToken(key, st.agentToken);
-      st.bootstrapSent = false;
-      st.modelSeenSeqs = new Set();
+      // 休眠的会话以后会原样复用：它已经引导过、也看过这些消息，不能把它当成新会话再发一遍引导唤醒、
+      // 再把看过的消息重新喂一遍。只有真正换新会话时才清（休眠作废归档时在 archiveDormantSession 里清）。
+      if (!toDormant) resetConversationIntro(st);
     }
     saveState();
     saveSocialV2State();
-    stopRetiredSessionWork(sessionId, key);
-    log(`会话权限已变化，停用旧映射 ${key} -> ${sessionId}`);
+    if (toDormant) {
+      // 只停掉在途工作，不归档：回到同一模式、同一 preset 时原样复用（令牌已在上面轮换，休眠期间旧令牌无效）
+      stopSessionWorkOnly(sessionId, key);
+      log(`模式切换，会话休眠 ${key} -> ${sessionId}（回到 ${parsePolicyMode(state.dormantSessions[key].policy)} 时复用，不归档）`);
+    } else {
+      stopRetiredSessionWork(sessionId, key);
+      log(`会话权限已变化，停用旧映射 ${key} -> ${sessionId}`);
+    }
+  }
+
+  // ── 模式切换不失忆：休眠表 + owner 私聊交接（逻辑在 src/mode-handover.js） ────────────
+  const parsePolicyMode = (policy) => { try { return String(JSON.parse(policy)[0] ?? ''); } catch { return ''; } };
+  const ownerKeyOf = () => `private:${String(cfg.ownerQQ ?? '')}`;
+  const hibernateEnabled = () => cfg.admin?.hibernateChatSessions !== false;
+  const handoverEnabled = () => cfg.admin?.handover !== false && /^[1-9]\d{0,11}$/.test(String(cfg.ownerQQ ?? ''));
+  const dormantMaxMs = () => Math.max(60_000, Number(cfg.admin?.dormantMaxMs) || DORMANT_MAX_MS);
+  // owner 私聊往来（只记 owner 私聊；管理通道命令 / 确认码 / TOTP 在交给模型前已被拦截，不会进来）
+  const ownerTranscript = createOwnerTranscript({
+    file: path.join(STATE_DIR, 'admin', 'owner-transcript.json'),
+    redact: (t) => redactSensitiveText(redactKnownTokensOnly(t)),
+    onError: (error) => log(`⚠️ owner 私聊交接记录读写失败：${error?.message ?? error}`),
+  });
+  const pendingHandover = new Map(); // key -> { resumed, from, to, dormantAt? }：下一条发给该会话的消息要带上的交接
+  let lastAgentLevel = 'L1';
+  function recordOwnerTranscript(key, role, text) {
+    if (!handoverEnabled() || key !== ownerKeyOf()) return;
+    ownerTranscript.record({ role, text, mode: currentMode, level: currentLevel });
+  }
+  /** 只停在途工作、不归档（休眠用）。 */
+  function stopSessionWorkOnly(sessionId, key = '') {
+    void (async () => {
+      try { await withTimeout(api.stopSessionWork(sessionId), DSH_CONTROL_TIMEOUT_MS, 'stopSessionWork'); }
+      catch (error) { log(`⚠️ 停止休眠会话的在途工作失败 ${key}：${error?.message ?? error}`); }
+    })();
+  }
+  /** 会话换新时：下一次唤醒要按「首次」走引导，模型也没看过任何消息。 */
+  function resetConversationIntro(st) {
+    st.bootstrapSent = false;
+    st.modelSeenSeqs = new Set();
+  }
+  /** 休眠会话作废：停掉并归档。 */
+  function archiveDormantSession(key, reason = '过期或策略已变') {
+    const d = state.dormantSessions[key];
+    if (!d) return;
+    delete state.dormantSessions[key];
+    // 休眠时保留了「已引导 / 已看过」；作废后下一个会话是全新的，要重新引导（当前已有新会话在用时不动它）
+    const st = socialV2.conversations.get(key);
+    if (st && !state.sessions[key]) {
+      resetConversationIntro(st);
+      saveSocialV2State();
+    }
+    saveState();
+    stopRetiredSessionWork(d.sessionId, key);
+    log(`休眠会话归档 ${key} -> ${d.sessionId}（${reason}）`);
+  }
+  /** 定期 / 模式切换后清理：过期、策略对不上、不再被允许的休眠会话归档。可复用的留到下一条消息再恢复。 */
+  function pruneDormantSessions() {
+    for (const [key, d] of Object.entries(state.dormantSessions)) {
+      const decision = dormantDecision(d, {
+        now: Date.now(), maxMs: dormantMaxMs(), inClosedAgent: currentMode === 'closed-agent',
+        currentPolicy: sessionPolicy(key), allowed: isSessionAllowedInCurrentMode(key),
+      });
+      if (decision === 'archive') archiveDormantSession(key);
+    }
+  }
+  /** 手动重置会话时：休眠的那份也不要了，owner 的交接记录一并清空（用户要的就是「从头开始」）。 */
+  function discardDormantForReset(key) {
+    if (state.dormantSessions[key]) archiveDormantSession(key, '会话被重置');
+    pendingHandover.delete(key);
+    if (key === ownerKeyOf()) ownerTranscript.clear();
+  }
+  /** 取出（并清掉）要放在这次消息最前面的交接文字。 */
+  function withHandover(key, promptText) {
+    const p = pendingHandover.get(key);
+    if (!p) return promptText;
+    pendingHandover.delete(key);
+    if (!handoverEnabled()) return promptText;
+    const now = Date.now();
+    let block = '';
+    if (key === ownerKeyOf()) {
+      // 最新的一两条 owner 消息就在这次消息里，交接里不重复
+      const entries = ownerTranscript.recent({ since: p.resumed ? p.dormantAt : 0 });
+      while (entries.length && entries[entries.length - 1].role === 'owner' && now - entries[entries.length - 1].at < 60_000) entries.pop();
+      block = buildOwnerHandover({ entries, from: p.from, to: p.to, resumed: p.resumed, dormantMs: p.resumed ? now - p.dormantAt : 0, now });
+    } else if (p.resumed) {
+      block = buildGroupResumeNote({ dormantMs: now - p.dormantAt, from: p.from });
+    }
+    return block ? `${block}\n\n${promptText}` : promptText;
   }
 
   function reconcileSessionPolicies() {
@@ -3108,9 +3230,12 @@ async function main() {
     // 映射删除，每个群的上下文全丢，日志里只有一句「会话权限已变化」。
     // 一次网络抖动换来全体失忆，代价完全不成比例。清单为空时宁可不判定，等下一轮。
     if (dshPresetIds.length === 0) return;
+    // 进 closed-agent 时，聊天会话休眠而不是归档；回落后同一模式、同一 preset 原样复用（见 src/mode-handover.js）
+    const hibernate = currentMode === 'closed-agent' && hibernateEnabled();
     for (const [key, sessionId] of Object.entries(state.sessions)) {
-      if (!isCurrentSession(key, sessionId)) retireSession(key);
+      if (!isCurrentSession(key, sessionId)) retireSession(key, { hibernate });
     }
+    pruneDormantSessions();
   }
 
   let flushingQueue = false;
@@ -4996,6 +5121,7 @@ async function main() {
             socialV2.conversations.delete(key);
             seenForwardIds.delete(key);
             forgetConversationCaches(key); // 含 qq_wait_for_messages 的等待租约
+            discardDormantForReset(key);
           }
           saveState();
           pendingWakeKeys.clear();
@@ -6764,7 +6890,12 @@ async function main() {
                 seq: found.seq
               };
             } else {
-              info = await resolveReplyInfo(kind, id, messageId);
+              info = await resolveReplyInfo(kind, id, messageId, null, { waitMs: REPLY_TOOL_WAIT_MS });
+              if (info?.pending && !found) {
+                sendJson({ ok: true, key, messageId, info: { pending: true, messageId, note: '原消息还在从 QQ 后端加载（较早的合并转发可能要一两分钟），稍后再查一次这个 id' } });
+                return;
+              }
+              if (info?.pending) info = null;
               if (!info && found) {
                 info = {
                   sender: String(found.sender || ''),
@@ -6825,54 +6956,31 @@ async function main() {
             return;
           }
           try {
-            const data = await bot.raw('get_forward_msg', { id });
+            // 读合并转发：带缓存与并发去重，后台用长超时（NapCat 读较早的转发实测七十多秒）
+            const data = await forwardRawCache.get(id, { waitMs: FORWARD_MAIN_WAIT_MS });
             const formatted = formatForwardResponse(data);
-            const remember = (fid) => {
-              if (!fid) return;
-              let set = seenForwardIds.get(key);
-              if (!set) {
-                set = new Set();
-                seenForwardIds.set(key, set);
-              }
-              set.add(fid);
-              if (set.size > 1000) {
-                for (const old of set) {
-                  set.delete(old);
-                  if (set.size <= 1000) break;
-                }
-              }
-            };
             // 把本层出现的嵌套 forward id 登记为“本会话已见过”，AI 后续可直接再次读取。
-            for (const m of formatted.messages || []) {
-              for (const fid of m.nestedForwardIds || []) remember(fid);
-            }
-            // 抓取嵌套转发的前几条作为预览，让 AI 不需要二次调用也能先看到内容。
-            const nestedPreviews = [];
-            const nestedIds = [];
-            const seenNested = new Set();
-            for (const m of formatted.messages || []) {
-              for (const fid of m.nestedForwardIds || []) {
-                if (!seenNested.has(fid) && nestedIds.length < 5) {
-                  seenNested.add(fid);
-                  nestedIds.push(fid);
-                }
-              }
-            }
-            for (const fid of nestedIds) {
+            for (const m of formatted.messages || []) rememberForwardIds(key, m.nestedForwardIds);
+            // 抓取嵌套转发的前几条作为预览，让 AI 不需要二次调用也能先看到内容（最多 5 个，并行，各自最多等一会儿）。
+            const nestedIds = mergeForwardIds(...(formatted.messages || []).map((m) => m.nestedForwardIds)).slice(0, 5);
+            const nestedPreviews = await Promise.all(nestedIds.map(async (fid) => {
               try {
-                const ndata = await bot.raw('get_forward_msg', { id: fid });
+                const ndata = await forwardRawCache.get(fid, { waitMs: FORWARD_NESTED_WAIT_MS });
                 const nfmt = formatForwardResponse(ndata, { maxMessages: 3, maxCharsPerMessage: 120 });
-                for (const nm of nfmt.messages || []) {
-                  for (const nfid of nm.nestedForwardIds || []) remember(nfid);
-                }
-                nestedPreviews.push({ id: fid, ...nfmt });
+                for (const nm of nfmt.messages || []) rememberForwardIds(key, nm.nestedForwardIds);
+                return { id: fid, ...nfmt };
               } catch (error) {
+                if (error?.code === 'still-loading') return { id: fid, loading: true, error: '嵌套转发还在加载，稍后用 qq_get_forward_msg 直接查看这个 id' };
                 log(`嵌套转发预览失败 ${key} ${fid}:`, error?.message ?? error);
-                nestedPreviews.push({ id: fid, error: error?.message ?? '嵌套转发读取失败' });
+                return { id: fid, error: error?.message ?? '嵌套转发读取失败' };
               }
-            }
+            }));
             sendJson({ ok: true, key, id, ...formatted, nestedPreviews });
           } catch (error) {
+            if (error?.code === 'still-loading') {
+              sendJson({ ok: false, loading: true, error: '读取合并转发超过 2 分钟还没回来（QQ 后端还在取，较早的转发会比较慢）；稍后再调用一次即可，结果会缓存' }, 504);
+              return;
+            }
             log(`合并转发查询失败 ${key} ${id}: ${error?.message ?? error}`);
             sendJson({ ok: false, error: `合并转发查询失败：${error?.message ?? error}` }, 500);
           }
@@ -7656,6 +7764,7 @@ async function main() {
           // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
           // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
           forgetConversationCaches(key);
+          discardDormantForReset(key);
           saveSocialV2State();
           saveState();
           // 归档只隐藏会话，不终止 DSH 侧排队的工作；先清队列并取消当前回合。
@@ -7719,6 +7828,10 @@ async function main() {
           CONVERSATION_TOKENS.clear();
           KNOWN_AGENT_TOKENS.clear();
           saveSocialV2State();
+          // 休眠中的会话与 owner 私聊交接记录也一起作废（清空工作区 = 从头开始）
+          for (const key of Object.keys(state.dormantSessions)) archiveDormantSession(key, '工作区已清空');
+          pendingHandover.clear();
+          ownerTranscript.clear();
           state.sessions = {};
           state.sessionPolicies = {};
           reverse.clear();
@@ -8212,10 +8325,13 @@ async function main() {
     return [`https://gxh.vip.qq.com/club/item/parcel/item/${id.slice(0, 2)}/${id}/raw300.gif`];
   }
 
-  // 有些网关不带 emoji_id，但 file 名里就嵌着它（实测 "f9-<32 位 hex>.gif"）。
+  // 有些网关不带 emoji_id，但 file 名里就嵌着它（实测市场表情是 "f9-<32 位 hex>.gif"：前缀 = id 的前两位）。
+  // ⚠️ 只认这种「两位前缀-32 位 hex」的写法。普通 QQ 图片的文件名本身就是 32 位哈希（"<32 位 HEX>.jpg"），
+  // 以前的宽松匹配会把它们当成表情：先去拼一个必然 404 的表情 CDN 地址，日志里也错标成「表情」。
   function emojiIdFromFileName(file) {
-    const match = /(?:^|[^0-9a-f])([0-9a-f]{32})\.(?:gif|png|jpe?g|webp)$/i.exec(String(file ?? '').trim());
-    return match ? match[1] : '';
+    const match = /(?:^|[\\/])([0-9a-f]{2})-([0-9a-f]{32})\.(?:gif|png|jpe?g|webp)$/i.exec(String(file ?? '').trim());
+    if (!match || match[1].toLowerCase() !== match[2].slice(0, 2).toLowerCase()) return '';
+    return match[2];
   }
 
   /** 校验一张图片字节：格式、大小（调用方已限）、像素上限；不通过返回 null。 */
@@ -8237,6 +8353,8 @@ async function main() {
   async function fetchOneBotImage(media, { maxBytes = MAX_MEDIA_BYTES } = {}) {
     // 表情包（市场/收藏表情）优先走 CDN：get_image 对市场表情必然失败
     // （SnowLuma 缓存里没有该文件），先试 URL 能省一次失败往返，也更可靠。
+    // 只有真的是表情才按表情处理：kind=sticker（mface 市场表情）、带 emoji_id（字段或「前缀-id」文件名）、sub_type=1。
+    // 文件名是 32 位哈希的普通图片不算（见 emojiIdFromFileName）。
     const emojiId = String(media.emojiId || emojiIdFromFileName(media.file) || '');
     const isSticker = media.kind === 'sticker' || !!emojiId || String(media.subType || '') === '1';
     const label = isSticker ? '表情' : '图片';
@@ -8598,6 +8716,7 @@ async function main() {
       return false;
     }
     await sendToQQ(key, text);
+    recordOwnerTranscript(key, 'ai', text);
     return true;
   }
 
@@ -8663,6 +8782,37 @@ async function main() {
     }
     if (sessionPromises.has(key)) return sessionPromises.get(key);
     const promise = (async () => {
+      // 先看有没有可复用的休眠会话（进 agent 前的聊天会话；回到同一模式、同一 preset 才复用）
+      const dormant = hibernateEnabled() ? state.dormantSessions[key] : null;
+      if (dormant) {
+        const decision = dormantDecision(dormant, {
+          now: Date.now(), maxMs: dormantMaxMs(), inClosedAgent: currentMode === 'closed-agent',
+          currentPolicy: policy, allowed: isSessionAllowedInCurrentMode(key),
+        });
+        if (decision === 'archive') archiveDormantSession(key);
+        if (decision === 'resume') {
+          const sid = dormant.sessionId;
+          delete state.dormantSessions[key];
+          state.sessions[key] = sid;
+          state.sessionPolicies[key] = policy;
+          reverse.set(sid, key);
+          saveState();
+          api.events.follow(sid);
+          const applied = await ensureChatModel(sid);
+          if (applied === 'not-found') {
+            log(`休眠会话 ${key} -> ${sid} 在 DSH 侧已不存在，改为新建`);
+            retireSession(key);
+          } else {
+            if (epoch !== sessionEpoch || !isCurrentSession(key, sid)) {
+              if (state.sessions[key] === sid) retireSession(key);
+              throw new Error('会话恢复期间已重置或权限已变化');
+            }
+            pendingHandover.set(key, { resumed: true, dormantAt: dormant.dormantAt, from: { mode: 'closed-agent', level: lastAgentLevel }, to: { mode: currentMode, level: currentLevel } });
+            log(`会话从休眠恢复 ${key} -> ${sid}（休眠 ${Math.round((Date.now() - dormant.dormantAt) / 60000)} 分钟）`);
+            return sid;
+          }
+        }
+      }
       const dir = cfg.sessionCwd ? String(cfg.sessionCwd) : path.join(STATE_DIR, 'agents');
       fs.mkdirSync(dir, { recursive: true });
       let sessionId;
@@ -8801,6 +8951,28 @@ async function main() {
   const messageMediaStore = new Map();
   // 二代会话见过的 forward id（有界，避免 recentMessages 滚动淘汰后无法读取刚见过的转发）
   const seenForwardIds = new Map(); // key -> Set<string>
+  // 合并转发内容（get_forward_msg 原始结果）的慢取缓存：同一个 id 只取一次，30 分钟内直接复用。
+  // forward id 本身已按会话做过可见性校验（见 /api/socialV2/forward-message），缓存按 id 共享不会越权。
+  const forwardRawCache = createSlowFetchCache({
+    fetch: (fid) => bot.raw('get_forward_msg', { id: fid }, { timeoutMs: SLOW_FETCH_TIMEOUT_MS }),
+    max: 200,
+  });
+  // 登记「本会话见过」的 forward id（有界，超过 1000 个丢最旧的）。
+  // 来源：收到的消息、读合并转发时的嵌套 id、**本会话里被引用的消息**（已在 resolveReplyInfo 里校验过归属）。
+  function rememberForwardIds(key, ids) {
+    for (const raw of Array.isArray(ids) ? ids : []) {
+      const fid = sanitizeForwardId(raw);
+      if (!fid) continue;
+      let set = seenForwardIds.get(key);
+      if (!set) {
+        set = new Set();
+        seenForwardIds.set(key, set);
+      }
+      set.delete(fid);
+      set.add(fid);
+      while (set.size > 1000) set.delete(set.values().next().value);
+    }
+  }
 
   // 归一化“指定群友发言唤醒”名单：
   // - 只保留正整数 QQ 号（字符串形式），拒绝 null/对象/“null”/非法字符等脏数据；
@@ -9805,10 +9977,11 @@ async function main() {
         promptText += `\n\n【本次消息快照】\n${JSON.stringify(wakeSnapshot)}\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
       }
     }
-    let content = [{ type: 'text', text: withSlangContext(promptText) }];
+    const modelText = withSlangContext(withHandover(key, promptText));
+    let content = [{ type: 'text', text: modelText }];
     if (Array.isArray(opts.media) && opts.media.length > 0) {
       const imageParts = await resolveMediaList(opts.media);
-      content = [{ type: 'text', text: withSlangContext(promptText) }, ...imageParts];
+      content = [{ type: 'text', text: modelText }, ...imageParts];
     }
     // 媒体解析成功后再标记退场，避免解析异常时残留退场标记。
     if (!isCurrentSession(key, sessionId)) throw new Error('投递前会话已重置或权限已变化');
@@ -10313,6 +10486,12 @@ async function main() {
   const replyInfoCache = new Map(); // `kind:convId:messageId` -> { info, ts }
   const REPLY_INFO_TTL_MS = 10 * 60 * 1000;
   const REPLY_NEGATIVE_TTL_MS = 5 * 1000; // 失败/归属缺失只短缓存，避免一次瞬时抖动导致长时间解析失败
+  // 被引用原消息（get_msg 原始结果）的慢取缓存：后台用长超时去取，调用方只等一会儿（见 src/quote-forward.js）。
+  const replyRawCache = createSlowFetchCache({
+    fetch: (messageId) => bot.getMessage(Number(messageId), { timeoutMs: SLOW_FETCH_TIMEOUT_MS }),
+    ttlMs: REPLY_INFO_TTL_MS,
+    negativeTtlMs: REPLY_NEGATIVE_TTL_MS,
+  });
   function pruneReplyInfoCache() {
     if (replyInfoCache.size <= 1000) return;
     const now = Date.now();
@@ -10337,7 +10516,9 @@ async function main() {
     return /确认\s*\d{4,8}|\/confirm|确认请回复|审批\s*#\d+|模式已变更|管理通道|动态码|TOTP|^\s*\/(mode|level|perm|permission|panic|cancel|approvals|audit|whois|person|note|share|say|review|admin)\b/i.test(text);
   }
 
-  async function resolveReplyInfo(kind, convId, messageId, selfId = null) {
+  // waitMs > 0：最多等这么久，等不到返回 { pending: true, messageId }（后台继续取，结果进缓存；不负缓存）。
+  // 注意 pending **不是**校验通过：需要确认归属的地方（发送引用）必须把它当成 null。
+  async function resolveReplyInfo(kind, convId, messageId, selfId = null, { waitMs = 0 } = {}) {
     pruneReplyInfoCache();
     const cacheKey = `${kind}:${String(convId)}:${String(messageId)}`;
     const hit = replyInfoCache.get(cacheKey);
@@ -10349,7 +10530,13 @@ async function main() {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
       }
-      const raw = await bot.getMessage(numericId);
+      let raw;
+      try {
+        raw = await replyRawCache.get(String(numericId), { waitMs });
+      } catch (error) {
+        if (error?.code === 'still-loading') return { pending: true, messageId: String(messageId) };
+        throw error;
+      }
       if (!raw) {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
@@ -10395,10 +10582,15 @@ async function main() {
         includeReply: false
       });
       const senderUserId = raw.sender?.user_id ?? raw.user_id ?? null;
+      // 被引用消息里的合并转发 id：归属已在上面校验过（同群 / 同一私聊），登记为本会话可见，
+      // 这样 AI 看到「[引用 某人：[转发消息 id=…]]」后能直接用 qq_get_forward_msg 打开（哪怕原转发早已滚出最近消息）。
+      const forwardIds = extractForwardIds(raw.message ?? []).map(sanitizeForwardId).filter(Boolean);
+      if (forwardIds.length) rememberForwardIds(`${kind}:${String(convId)}`, forwardIds);
       const info = {
         sender: String(sender ?? ''),
         text: String(text ?? '').slice(0, 200),
-        userId: senderUserId != null ? String(senderUserId) : null
+        userId: senderUserId != null ? String(senderUserId) : null,
+        forwardIds
       };
       replyInfoCache.set(cacheKey, { info, ts: Date.now() });
       return info;
@@ -10410,6 +10602,12 @@ async function main() {
   }
 
   // 发送引用时解析目标：支持真实 QQ message_id，也支持 recentMessages 里的 seq（自动映射到真实 messageId）。
+  // 发送引用必须确认目标属于本会话：最多等 30 秒（和以前一样）；还在后台加载的不算确认。
+  async function verifiedReplyInfo(kind, convId, messageId) {
+    const info = await resolveReplyInfo(kind, convId, messageId, null, { waitMs: 30_000 });
+    return info?.pending ? null : info;
+  }
+
   async function resolveReplyTargetV2(st, kind, convId, ref) {
     const refStr = String(ref ?? '').trim();
     if (!refStr) return null;
@@ -10417,7 +10615,7 @@ async function main() {
     // 若 ref 命中本地 seq，且本地存有真实 messageId，优先按 seq 映射，避免与真实 id 冲突。
     if (found && found.messageId && String(found.messageId) !== refStr) {
       const realId = String(found.messageId);
-      const realInfo = await resolveReplyInfo(kind, convId, realId);
+      const realInfo = await verifiedReplyInfo(kind, convId, realId);
       return {
         info: realInfo || {
           sender: String(found.sender || ''),
@@ -10429,11 +10627,11 @@ async function main() {
         messageId: realId
       };
     }
-    let info = await resolveReplyInfo(kind, convId, refStr);
+    let info = await verifiedReplyInfo(kind, convId, refStr);
     if (info) return { info, messageId: refStr };
     if (found && found.messageId) {
       const realId = String(found.messageId);
-      const realInfo = await resolveReplyInfo(kind, convId, realId);
+      const realInfo = await verifiedReplyInfo(kind, convId, realId);
       return {
         info: realInfo || {
           sender: String(found.sender || ''),
@@ -10449,11 +10647,13 @@ async function main() {
   }
 
   // 判断当前消息是否“引用/回复了机器人自己”：若是，则桥接层也把它当作直接对 AI 说。
-  async function isQuoteTargetSelf(message, kind, id, selfId) {
+  async function isQuoteTargetSelf(message, kind, id, selfId, resolver = null) {
     if (!Array.isArray(message) || selfId == null) return false;
     for (const seg of message) {
       if (seg?.type === 'reply' && seg.data?.id != null) {
-        const info = await resolveReplyInfo(kind, id, String(seg.data.id), selfId);
+        const info = resolver
+          ? await resolver(String(seg.data.id))
+          : await resolveReplyInfo(kind, id, String(seg.data.id), selfId, { waitMs: REPLY_INGEST_WAIT_MS });
         if (info?.userId && String(info.userId) === String(selfId)) return true;
       }
     }
@@ -10579,6 +10779,7 @@ async function main() {
   }
 
   function recordSentMessagesV2(key, messages) {
+    for (const m of Array.isArray(messages) ? messages : []) recordOwnerTranscript(key, 'ai', m);
     const st = getSocialV2State(key);
     const now = Date.now();
     const recentLimit = Number(cfg.socialV2?.context?.recentLimit) || 100;
@@ -11508,7 +11709,20 @@ async function main() {
       if (kind !== 'group') return null;
       return resolveGroupMemberName(event.group_id, qq);
     };
-    const resolveReply = (messageId) => resolveReplyInfo(kind, id, messageId, event.self_id);
+    // 收消息时解析引用最多等几秒（不阻塞整条消息）；同一条消息里同一个引用只解析一次；
+    // 顺手收集被引用消息里的合并转发 id，登记到这条消息上（AI 能直接打开）。
+    const replyMemo = new Map();
+    const quotedForwardIds = [];
+    const resolveReply = (messageId) => {
+      const k = String(messageId);
+      if (!replyMemo.has(k)) {
+        replyMemo.set(k, resolveReplyInfo(kind, id, k, event.self_id, { waitMs: REPLY_INGEST_WAIT_MS }).then((info) => {
+          for (const fid of info?.forwardIds ?? []) if (!quotedForwardIds.includes(fid)) quotedForwardIds.push(fid);
+          return info;
+        }));
+      }
+      return replyMemo.get(k);
+    };
     // textContent 带引用对象信息，供 DSH 判断“这句话在对谁说”；
     // plainContent 只保留当前消息自己的文字，用于命令/指向性判断，避免被引用原文干扰。
     const textContent = await segmentsToText(event.message ?? [], { resolveAtName, resolveReply });
@@ -11533,10 +11747,12 @@ async function main() {
     }
     // 引用对象是机器人自己时，视为直接对 AI 说（即使当前文字没有 @/关键词）。
     // 因此必须先解析 quoteTargetIsSelf 再做空文本过滤，避免“只引用不附文”被漏掉。
-    const quoteTargetIsSelf = await isQuoteTargetSelf(event.message ?? [], kind, id, event.self_id);
+    const quoteTargetIsSelf = await isQuoteTargetSelf(event.message ?? [], kind, id, event.self_id, resolveReply);
     if (!isSessionAllowedInCurrentMode(key)) return;
     if (!plainContent && !quoteTargetIsSelf) return;
     const isOwner = String(event.user_id) === String(cfg.ownerQQ ?? '');
+    // owner 私聊交接记录：斜杠命令不记（/reset 之类由桥接处理）；管理通道命令、确认码、TOTP 在上面已被拦截
+    if (kind === 'private' && isOwner && plainContent && !plainContent.startsWith('/')) recordOwnerTranscript(key, 'owner', plainContent);
     const roleState = readRoleState();
 
     // v0.3.0 人物库：以 QQ 号记录「看到此人发言」（群名片/昵称只是附带字段）。
@@ -11637,6 +11853,7 @@ async function main() {
           // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
           // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
           forgetConversationCaches(key);
+          discardDormantForReset(key);
           saveSocialV2State();
           saveState();
           // 与 retireSession 一致：先终止 DSH 侧排队的工作，再归档（归档只隐藏会话）。
@@ -11684,7 +11901,7 @@ async function main() {
     // 二代仿真模式（reserved2）：唤醒调度
     if (currentMode === 'reserved2') {
       const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
-      appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, extractForwardIds(event.message ?? []));
+      appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds));
       // 二代同样收集群聊黑话学习素材（AI 自主提交之外，桥接仍自动提取高频陌生词）
       if (kind === 'group') feedSlangWindow(key, sender, plainContent);
       if (socialV2.paused) {
@@ -11831,10 +12048,11 @@ async function main() {
       }
       throw error;
     }
-    let content = [{ type: 'text', text: withSlangContext(promptText) }];
+    const modelText = withSlangContext(withHandover(key, promptText));
+    let content = [{ type: 'text', text: modelText }];
     if (Array.isArray(mediaList) && mediaList.length > 0) {
       const imageParts = await resolveMediaList(mediaList);
-      content = [{ type: 'text', text: withSlangContext(promptText) }, ...imageParts];
+      content = [{ type: 'text', text: modelText }, ...imageParts];
     }
     if (!isCurrentSession(key, sessionId)) throw new Error('投递前会话已重置或权限已变化');
     const accepted = await api.sessions.prompt({
@@ -12407,6 +12625,8 @@ async function main() {
                   }
                   continue;
                 }
+                // owner 私聊交接记录：只记模型真正说出去的话（审计通过之后；桥接自己的提示不记）
+                recordOwnerTranscript(key, 'ai', plain);
                 // 仿真群友模式：时间线多段发送（主回复 + 可选二次补刀）
                 if (isSocialEnabled()) {
                   if (shouldBlockSilentReply(key)) {

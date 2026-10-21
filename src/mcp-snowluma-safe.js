@@ -293,7 +293,7 @@ async function legacyReadToolAllowed() {
   return String(status?.mode ?? '') === 'closed-agent';
 }
 
-const server = new McpServer({ name: 'snowluma-safe', version: '1.0.2' });
+const server = new McpServer({ name: 'snowluma-safe', version: '1.0.3' });
 
 // ── 工具开关必须在**注册期**生效，而不是只在校验期 ──────────────────────────
 //
@@ -844,7 +844,7 @@ server.tool(
 
 server.tool(
   'qq_get_message_detail',
-  '按 message_id / 本地 seq 查看单条消息的发送者、引用信息与正文（只读）。注意：正文最多返回 200 字符，textTruncated=true 表示被截断，这里不是读取长消息全文的入口。',
+  '按 message_id / 本地 seq 查看单条消息的发送者、引用信息与正文（只读）。注意：正文最多返回 200 字符，textTruncated=true 表示被截断，这里不是读取长消息全文的入口。消息里出现「[引用消息 id=…（原消息加载较慢…）]」时，用这个 id 查；返回 pending:true 表示 QQ 后端还在取（较早的合并转发可能要一两分钟），过一会儿再查即可。返回的 forwardIds 可以直接交给 qq_get_forward_msg 打开。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
@@ -1321,9 +1321,10 @@ if (cfg.socialV2?.tools?.getForwardMsg !== false) {
     async ({ key, token, id }) => {
       try {
         const q = new URLSearchParams({ key, id: String(id) });
+        // 桥接最多等 2 分钟主层 + 30 秒嵌套预览（较早的合并转发 NapCat 要七十多秒），这里留足余量
         const data = await agentApi(`/api/socialV2/forward-message?${q.toString()}`, {
           headers: { 'x-agent-token': token },
-          timeoutMs: 120000
+          timeoutMs: 180000
         });
         const content = [{ type: 'text', text: serializeModelData(data) }];
         // 收集所有层级的图片/表情元数据（含嵌套预览），最多返回 5 张。

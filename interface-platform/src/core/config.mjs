@@ -39,7 +39,7 @@ export function defaultConfig(os = process.platform) {
     accounts: {},
     compat: { onebot: { enabled: true, account: 'auto' } },
     recovery: { reconnect: true, reconnectMinMs: 1000, reconnectMaxMs: 30000 },
-    limits: { queueLimit: 200, eventWindow: 2000, requestTimeoutMs: 30000, maxMessageBytes: 64 * 1024 * 1024 },
+    limits: { queueLimit: 200, eventWindow: 2000, requestTimeoutMs: 30000, slowReadTimeoutMs: 120000, maxMessageBytes: 64 * 1024 * 1024 },
   };
 }
 

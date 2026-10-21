@@ -32,6 +32,10 @@ export function oneBotCapabilities(notes = {}) {
 }
 
 const HEARTBEAT_STALE_MS = 95_000;
+// 慢的只读动作：NapCat 读较早的合并转发时 get_msg / get_forward_msg 实测要七十多秒才回执，
+// 用默认的 30 秒会在上游真正回来之前就报超时。只放宽这几个只读动作，发送类动作仍按默认超时。
+export const SLOW_READ_ACTIONS = Object.freeze(['get_msg', 'get_forward_msg']);
+export const SLOW_READ_TIMEOUT_MS = 120_000;
 // 握手超时：后端刚启动时端口可能已开但迟迟不回握手，Node 内置 WebSocket 没有自带超时，会一直挂着
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 
@@ -42,6 +46,8 @@ export function createOneBotWsConnector({ provider, discover, capabilities = () 
   const links = new Map(); // key -> link
   let echoSeq = 0;
   const timeoutMs = Number(limits.requestTimeoutMs) || 30_000;
+  const slowTimeoutMs = Math.max(timeoutMs, Number(limits.slowReadTimeoutMs) || SLOW_READ_TIMEOUT_MS);
+  const timeoutFor = (action) => (SLOW_READ_ACTIONS.includes(action) ? slowTimeoutMs : timeoutMs);
 
   function endpointsNow() {
     if (inst.upstream.homeDir) {
@@ -337,7 +343,7 @@ export function createOneBotWsConnector({ provider, discover, capabilities = () 
       const L = linkFor(account);
       if (!L) throw ERR.instanceUnavailable(inst.id, `没有账号 ${account} 的链路`);
       if (/^send_/.test(action)) L.lastSendAt = now();
-      const r = await call(L, action, params, opts);
+      const r = await call(L, action, params, { timeoutMs: timeoutFor(action), ...opts });
       const { echo, ...rest } = r;
       return rest;
     },

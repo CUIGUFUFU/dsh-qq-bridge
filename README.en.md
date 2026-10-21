@@ -1,10 +1,10 @@
 # QQ ↔ DeepSeek Harness Bridge (qq-bridge-enhanced)
 
-**Supported systems: Windows · macOS · Linux** (qq-bridge-enhanced v1.0.2)
+**Supported systems: Windows · macOS · Linux** (qq-bridge-enhanced v1.0.3)
 
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
-> **qq-bridge-enhanced v1.0.2** — a fork of [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 (with the upstream r4 fixes merged in; origin and licensing in [NOTICE.md](NOTICE.md)).
+> **qq-bridge-enhanced v1.0.3** — a fork of [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 (with the upstream r4 fixes merged in; origin and licensing in [NOTICE.md](NOTICE.md)).
 > It turns one QQ account into an "AI group member" driven by DeepSeek Harness (DSH) agents, and runs on **Windows, macOS and Linux**.
 > Most documentation is in Chinese: the step-by-step deployment guide is [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md), the changelog is [CHANGELOG.md](CHANGELOG.md),
 > and the documentation index is [docs/README.md](docs/README.md).
@@ -24,6 +24,8 @@ QQ friends/groups become DSH conversations, and agent replies (including questio
 | Owner admin channel | Private chat `/mode agent L1~L3` → confirmation code → (TOTP for L3) → switch; `/panic` falls back at once | [ADMIN_CHANNEL.md](docs/guides/ADMIN_CHANNEL.md) |
 | Permission tiers | L0 group member / L1 read-only agent / L2 workspace read-write / L3 full access with per-action approval; there is no approval-free mode | same |
 | Approvals, fallback, audit | Numbered approvals `#n` with the real command arguments; idle high-privilege sessions fall back after 30 minutes; every change is reported to the owner; hash-chained audit log | same |
+| Mode switches keep memory (v1.0.3) | Entering agent mode puts the group / private chat sessions to sleep instead of archiving them; after fallback they resume as-is. The new agent session gets a handover of the recent private chat (owner private only, redacted). High-privilege sessions are still archived | [ADMIN_CHANNEL.md](docs/guides/ADMIN_CHANNEL.md) |
+| Quoted merged forwards (v1.0.3) | Quoting an older merged forward no longer stalls the message for 30 s; the AI can open the quoted forward (nested ones too), results are cached | [CHANGELOG.md](CHANGELOG.md) |
 | DSH model picker | Provider / model / reasoning effort as three linked selects fed by DSH's own model catalog, applied from the next message without a restart; warns about third-party providers (chat content leaves DeepSeek), turns images into text for models that can't see images, and marks unpriced models as estimated | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
 | DSH 0.2.1 | Works with DSH 0.2.0-rc.2 and 0.2.1; the 0.2.1 desktop app's random port is detected automatically, and the bridge follows it after DSH restarts | [DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) |
 
@@ -126,8 +128,8 @@ The standalone **voice sender tool** lives outside this repository (sibling fold
 
 ## Testing
 
-`npm run test:audit` runs the offline regression suite (no credentials, DSH, QQ or network): 58 scripts. On macOS and Linux, `test-console-encoding.mjs` fails by design
-(it checks the Windows console's `chcp`), so expect 57/58 there. The interface platform has its own suite: `cd interface-platform && npm test`.
+`npm run test:audit` runs the offline regression suite (no credentials, DSH, QQ or network): 60 scripts. On macOS and Linux, `test-console-encoding.mjs` fails by design
+(it checks the Windows console's `chcp`), so expect 59/60 there. The interface platform has its own suite: `cd interface-platform && npm test`.
 Test list and conventions: [docs/guides/TESTING.md](docs/guides/TESTING.md). `npm run self-test` runs a DSH-side link test (needs DSH, no QQ).
 
 ## Compliance

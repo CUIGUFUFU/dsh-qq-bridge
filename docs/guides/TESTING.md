@@ -3,7 +3,7 @@
 ## 离线回归（不需要 QQ、SnowLuma、DSH 或网络）
 
 ```powershell
-npm run test:audit      # 58 个脚本：原版与各版本新增的离线回归，清单见 scripts/test-audit.mjs；macOS 上 test-console-encoding 是已知失败（只适用于 Windows）
+npm run test:audit      # 60 个脚本：原版与各版本新增的离线回归，清单见 scripts/test-audit.mjs；macOS 上 test-console-encoding 是已知失败（只适用于 Windows）
 npm run test:v030       # 只跑 v0.3.0 的四个新测试
 ```
 
@@ -27,6 +27,8 @@ npm run test:v030       # 只跑 v0.3.0 的四个新测试
 | `scripts/test-deploy-fixes.mjs` | Windows 实机部署反馈的回归：ZIP 中文文件名 UTF-8 标志与可执行位、黑话研究日志计数、会话重置清等待租约、Linux 服务文件 POSIX 路径、禁止用 `URL.pathname` 当文件路径 |
 | `scripts/test-slang-guess.mjs` | 黑话研究未确认时的 AI 推测（`lastGuess`）：字段清洗与限长、不进提示词、不进给 AI 的公开条目、确认 / 填含义后清空、控制台只在「待研究」显示并转义、「采用为含义」只填编辑框 |
 | `scripts/test-dsh-model.mjs` | 控制台选择 DSH 模型：档位规范化与目录硬校验、selectModel 参数（无档位不带字段）、目录缓存、看图能力与图片降级成文字、第三方 / 价格 / off 提示；桥接接口写 config.json 并热生效、目录不可用拒绝保存、AI 令牌拒绝 |
+| `scripts/test-quote-forward.mjs` | 引用合并转发：慢取缓存（并发去重、负缓存、后台完成后命中）、收消息时引用解析最多等几秒不卡住、引用里的转发 id 登记为本会话可见（跨群不登记）、消息详情对加载中的 id 明确提示、读合并转发走缓存与长超时、接口平台只给 get_msg / get_forward_msg 放宽超时、发送引用时「加载中」不算确认归属 |
+| `scripts/test-mode-handover.mjs` | 切换 agent 等级不失忆：哪些会话能休眠、休眠表清洗、恢复 / 保留 / 归档判定；二代 → agent L2 → 回落的端到端（聊天会话不归档并原样复用、令牌作废、agent 会话第一条消息带私聊交接且不含群聊内容、回落时高权限会话归档、恢复后群只收到休眠提示）；过期 / 模式不同 / `/reset` / 关掉开关时归档；L1→L2 高权限会话不休眠；确认码与管理命令不进交接记录 |
 | `scripts/test-agent-preset-patches.mjs` | preset 源与 bundle patch 不漂移（含新 preset） |
 
 原版测试在本仓库里做过的调整（都是让测试不依赖开发机环境，没有放宽断言）：

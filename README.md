@@ -1,6 +1,6 @@
 # QQ ↔ DeepSeek Harness 桥接
 
-**支持系统：Windows · macOS · Linux**（qq-bridge-enhanced v1.0.2）
+**支持系统：Windows · macOS · Linux**（qq-bridge-enhanced v1.0.3）
 
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
@@ -14,7 +14,7 @@
 
 ---
 
-## 🆕 增强版（qq-bridge-enhanced v1.0.2）—— 支持 Windows、macOS、Linux
+## 🆕 增强版（qq-bridge-enhanced v1.0.3）—— 支持 Windows、macOS、Linux
 
 > 本仓库是 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 的二次开发版本（来源与授权见 [NOTICE.md](NOTICE.md)），已合并上游 r4 的修复。
 > 原版的全部功能（消息桥接、多群白名单、reserved2 二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查）保持不变；
@@ -33,6 +33,9 @@
 | 权限分级 | L0 群友 / L1 只读 Agent / L2 工作区读写 / L3 完全访问但每次审批；不存在免审批模式 | 同上 |
 | 审批增强 | 编号 `#n`、展示真实命令参数、并发不覆盖、超时自动拒绝 | 同上 |
 | 自动回落与审计 | 高权限闲置 30 分钟回落；每次变更私聊通知；哈希链审计日志 | 同上 |
+| 切换不失忆（v1.0.3） | 切到 agent 时群和私聊原来的会话休眠、回落后原样接着用；agent 会话能接上私聊话题（桥接注入交接，只含私聊、已脱敏）；高权限会话照常归档 | [ADMIN_CHANNEL.md](docs/guides/ADMIN_CHANNEL.md) |
+| 控制台选模型 | 提供方 / 模型 / 思考强度三个联动下拉，选项来自 DSH 模型目录，保存即生效；第三方提供方提示隐私、不能看图的模型自动把图片转文字 | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
+| 引用合并转发（v1.0.3） | 引用一条较早的合并转发时不再卡住整条消息；AI 能打开引用里的转发（含嵌套），读取结果缓存 | [CHANGELOG.md](CHANGELOG.md) |
 | DSH 0.2.1 | 兼容 0.2.0-rc.2 与 0.2.1；0.2.1 桌面版的随机端口自动识别、DSH 重启后自动跟上 | [DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) |
 
 ### 部署（无窗口版）

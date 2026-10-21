@@ -3,6 +3,44 @@
 本仓库（qq-bridge-enhanced）基于上游 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) `v0.2.0-r3`。
 上游更早的版本历史见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) 与上游 Release 页面。
 
+## v1.0.3 —— 2026-10-21
+
+在 v1.0.2 的基础上的修复版本：**切换 agent 等级不再失忆**；引用一条（较早的）合并转发时，AI 能看到并打开里面的内容，这条消息也不再卡 30 秒；普通图片不再被误当成表情。
+发布说明：[docs/release/RELEASE_NOTES_v1.0.3.md](docs/release/RELEASE_NOTES_v1.0.3.md)。
+
+### 升级注意（从 v1.0.2）
+- 沿用 `config.json`、`state/`、`interface-platform/state/`；执行 `npm ci`，重启控制中心（桥接和接口平台都要重启才会用上新代码）。没有数据格式变化，不需要重跑 `setup-dsh.mjs`。
+
+### 修复：切换 agent L1~L3 / 自动回落后 AI「失忆」（设计缺陷）
+- 现象（用户反馈）：切到 agent 会自动回落到二代仿真，回落又把 DSH 会话归档，「一用 L2 就几乎失忆」。原因：每次模式 / 级别切换，桥接把**所有**会话退役归档再新建，
+  连从没挂过工具的群聊会话也一起归档；新会话里也没有任何「刚才聊到哪了」。
+- 新模块 `src/mode-handover.js`：
+  - **聊天会话休眠复用**：进 closed-agent 时，非 closed-agent 建的、带明确 preset 的会话（qq-chat / qq-chat-v2）不归档，只停在途工作、撤销映射、轮换令牌，
+    记进 `sessions.json` 的 `dormantSessions`；回到同一模式、同一 preset 时原样复用（DSH 侧已不存在则新建）。过期（`admin.dormantMaxMs`，默认 24 小时）、
+    模式 / preset 不同、不再被允许、`/reset`、清空工作区时归档。群会话恢复后第一条消息带一句休眠提示。
+  - **owner 私聊交接**：`state/admin/owner-transcript.json` 记 owner 私聊往来（最多 60 条，0600，路径 / 凭据打码；只记 owner 发的和模型真正发出去的，
+    管理通道命令 / 确认码 / TOTP 本来就不交给模型、不会进来）。owner 会话因切换换新时注入最近往来，从休眠恢复时注入 agent 期间的往来，标明「不是新指令」；不含任何群聊原文。
+  - 高权限会话不休眠：agent 会话回落、`/panic`、L1→L2 仍然停掉并归档。
+  - 休眠保留「已引导 / 已看过的消息」：恢复后按正常原因唤醒，不再重发一遍首次引导（`【引导唤醒】`、初始提示词）、不把看过的消息重新喂一遍；休眠作废归档时才清，下一个新会话照常引导。（本机实测发现：恢复后曾多发一次引导唤醒。）
+- 新配置 `admin.hibernateChatSessions`（默认 true）、`admin.dormantMaxMs`、`admin.handover`（默认 true）；文档 `ADMIN_CHANNEL.md` 新增「切换不失忆」。
+- 新测试 `scripts/test-mode-handover.mjs`；测试夹具补注入 `role-card.js`（以前 agent 模式下 owner 私聊这条路径在夹具里跑不通）。
+
+### 修复：引用合并转发时内容丢失、整条消息卡 30 秒
+- 现象：群友引用一条（较早的）合并转发，AI 只看到「[引用消息]」，这条消息也晚了 30 秒才进未读。实测 macOS NapCat 4.18 读这种消息 `get_msg` / `get_forward_msg` 都要约 76 秒，而 SDK 和接口平台都只等 30 秒。
+- 新模块 `src/quote-forward.js`：慢取缓存（后台长超时 120 秒、并发去重、成功缓存、失败短暂负缓存）与「最多等一会儿」。
+- 收消息时引用解析最多等 4 秒（同一条消息里只解析一次，判断「是否引用机器人」复用结果），等不到先放带 id 的占位文字；原消息后台取到后缓存。
+- 被引用消息里的合并转发 id 在归属校验通过后登记为本会话可见，并记到这条消息的 `forwardIds` 上；跨群 / 跨私聊的不登记。
+- `qq_get_message_detail` 对加载中的 id 返回 `pending:true` 和「稍后再查」；工具说明同步更新。
+- 读合并转发走缓存（30 分钟、最多 200 条），嵌套预览并行、各自最多等 30 秒，还在加载的标出来；MCP 端超时改为 180 秒。
+- 发送引用时「加载中」不算确认目标归属（仍最多等 30 秒，和以前一样）。
+- 接口平台：`get_msg` / `get_forward_msg` 用 `limits.slowReadTimeoutMs`（默认 120 秒），其它动作仍按 `requestTimeoutMs`（30 秒）。
+- 新测试 `scripts/test-quote-forward.mjs`。
+
+### 修复：文件名是 32 位哈希的普通图片被误当成表情
+- 普通 QQ 图片的文件名本身就是 32 位哈希（`<32 位 HEX>.jpg`），旧的「从文件名推 emoji_id」规则会把它们当成表情：先去拼一个必然 404 的表情 CDN 地址，日志也错标成「表情获取失败」（实测：引用的合并转发里那张普通图片，`sub_type=0`）。
+- 现在只有真的是表情才按表情处理：`kind=sticker`（mface 市场表情）、带 `emoji_id`、`sub_type=1`，或市场表情特有的「两位前缀-32 位 hex」文件名（前缀必须等于 id 的前两位，例如 `f9-f96b….gif`）。
+- `test-media-search.mjs` 新增回归：哈希文件名的普通图片先走 get_image、失败时只试消息自带的链接、不拼表情 CDN；真表情的四种情况仍先走 CDN。
+
 ## v1.0.2 —— 2026-10-20
 
 在 v1.0.1 的基础上：换 SnowLuma 目录（例如升级到 2.x）时，新目录缺数据会先提醒迁移；补充 SnowLuma WebUI 登录相关的常见问题；

@@ -39,6 +39,9 @@
 | `maxPendingRequests` | `3` | 同时待确认的申请上限 |
 | `idleTimeoutMs` | `1800000` | 高权限闲置自动回落；`0` = 关闭（不建议） |
 | `maxElevatedMs` | `{ "L1": 14400000, "L2": 7200000, "L3": 3600000 }` | 各级别最长持续时间 |
+| `hibernateChatSessions` | `true` | 进 agent 时聊天会话休眠、回落后原样复用（v1.0.3）；`false` = 切换即归档（旧行为） |
+| `dormantMaxMs` | `86400000` | 休眠会话最长保留多久，超过归档 |
+| `handover` | `true` | 记录 owner 私聊往来，并在 owner 会话因切换换新 / 恢复时注入交接（只含 owner 私聊、已脱敏）；`false` = 不记录不注入 |
 | `totpMaxFailures` | `5` | TOTP 连续失败多少次锁定 |
 | `totpLockMs` | `900000` | 锁定时长 |
 | `allowL3` | `true` | `false` = 任何入口都不能开 L3。未配置 TOTP 时 L3 本来就不可用 |

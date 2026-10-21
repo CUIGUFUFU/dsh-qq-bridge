@@ -46,8 +46,8 @@ npm run release:zip
 或用 GitHub CLI：
 
 ```powershell
-gh release create v1.0.2 ../release/qq-bridge-enhanced-v1.0.2.zip ../release/qq-bridge-enhanced-v1.0.2.zip.sha256 `
-  --repo h-D-ACE/dsh-qq --title "qq-bridge-enhanced v1.0.2" --notes-file docs/release/RELEASE_NOTES_v1.0.2.md
+gh release create v1.0.3 ../release/qq-bridge-enhanced-v1.0.3.zip ../release/qq-bridge-enhanced-v1.0.3.zip.sha256 `
+  --repo h-D-ACE/dsh-qq --title "qq-bridge-enhanced v1.0.3" --notes-file docs/release/RELEASE_NOTES_v1.0.3.md
 ```
 
 **不要**把 SnowLuma 的安装包、`node_modules`、你的 `config.json` 或 `state/` 作为 Release 附件上传。

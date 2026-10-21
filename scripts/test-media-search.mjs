@@ -149,6 +149,53 @@ await test('fetchOneBotImage 表情优先 CDN，普通图片优先 get_image', a
   } finally { await h.close(); }
 });
 
+// ── 普通图片的文件名就是 32 位哈希：不能因此当成表情（v1.0.3） ─────────────────
+// 实测（macOS NapCat，引用一条合并转发里的普通图片，sub_type=0、文件名 "<32 位 HEX>.jpg"）：
+// 旧的文件名匹配把它当成了表情 → 先拼一个必然 404 的表情 CDN 地址、日志错标「表情获取失败」。
+// 现在只认 kind=sticker（mface）、emoji_id 字段、sub_type=1，或「两位前缀-32 位 hex」的市场表情文件名。
+await test('fetchOneBotImage：32 位哈希文件名的普通图片按图片处理，不拼表情 CDN', async () => {
+  const fetched = [];
+  const GIF = Buffer.from('R0lGODlhAQABAAAAACw=', 'base64');
+  const h = await bridgeHarness({
+    globals: { safeFetchBuffer: async (url) => { fetched.push(String(url)); return { buffer: GIF, mimeType: 'image/gif' }; } }
+  });
+  const HASH = '35D63246B220EB45F444A564D52032F6';
+  const cdn = (id) => `https://gxh.vip.qq.com/club/item/parcel/item/${id.slice(0, 2)}/${id}/raw300.gif`;
+  try {
+    // ① 普通图片（哈希文件名、带链接）：先问网关 get_image，不去抓表情 CDN
+    const img = await h.fetchOneBotImage({ kind: 'image', subType: '0', file: `${HASH}.jpg`, url: 'https://gchat.qpic.invalid/download?fileid=x' });
+    assert.ok(img?.buffer?.length, '图片取到了');
+    assert.deepEqual(h.calls.images, [`${HASH}.jpg`], '普通图片优先 get_image');
+    assert.equal(fetched.length, 0, '没去抓任何 URL');
+
+    // ② get_image 失败时只试消息里给的链接，不再拼表情 CDN 地址
+    h.bot.getImage = async () => { throw new Error('fixture: downloadRichMedia timeout'); };
+    await h.fetchOneBotImage({ kind: 'image', file: `${HASH.toLowerCase()}.png`, url: 'https://gchat.qpic.invalid/download?fileid=y' });
+    assert.deepEqual(fetched, ['https://gchat.qpic.invalid/download?fileid=y'], '只抓消息自带的链接');
+    assert.ok(!fetched.some((u) => u.includes('gxh.vip.qq.com')), '不拼表情 CDN');
+
+    // ③ 前缀和 id 对不上的文件名不算表情
+    fetched.length = 0;
+    await h.fetchOneBotImage({ kind: 'image', file: `ab-${'f96bf2d2d93c3530d5eb148f55206fb1'}.gif` });
+    assert.ok(!fetched.some((u) => u.includes('gxh.vip.qq.com')), '前缀不匹配的不当成表情');
+
+    // ④ 真表情：sub_type=1 / emoji_id / mface / 「前缀-id」文件名，仍然先走 CDN
+    const ID = 'f96bf2d2d93c3530d5eb148f55206fb1';
+    for (const media of [
+      { kind: 'image', subType: '1', file: `${HASH}.gif`, url: 'https://sticker.invalid/a.gif' },
+      { kind: 'image', subType: '0', emojiId: ID },
+      { kind: 'sticker', url: 'https://sticker.invalid/m.gif' },
+      { kind: 'image', subType: '0', file: `f9-${ID}.gif` },
+    ]) {
+      fetched.length = 0;
+      const got = await h.fetchOneBotImage(media);
+      assert.ok(got?.buffer?.length, `表情取到：${JSON.stringify(media)}`);
+      assert.ok(fetched.length >= 1, `表情先走 URL / CDN：${JSON.stringify(media)}`);
+    }
+    assert.equal(fetched.at(-1), cdn(ID), '文件名里的 emoji_id 仍能推出 CDN 地址');
+  } finally { await h.close(); }
+});
+
 await test('emojiCdnCandidates 只接受十六进制 id（防任意 URL 拼接）', async () => {
   const h = await bridgeHarness();
   try {
